@@ -1,102 +1,34 @@
 /**
- * グループ作成ユーティリティ
+ * グループ作成ユーティリティ - DB関数版
+ * ensure_group_and_membership() を使用
  */
 
 import { supabase } from '../supabase/client'
-import { generateGroupName } from './useGroup'
 
+/**
+ * グループを作成または参加
+ * DB関数 ensure_group_and_membership() を呼び出す
+ */
 export async function createOrJoinGroup(userId: string, userName: string): Promise<string> {
-  // 1. 既存のグループに所属しているかチェック
-  const { data: existingMember } = await supabase
-    .from('group_members')
-    .select('group_id')
-    .eq('user_id', userId)
-    .single()
+  const { data, error } = await supabase.rpc('ensure_group_and_membership')
 
-  if (existingMember) {
-    return existingMember.group_id
+  if (error) {
+    throw new Error('グループ作成に失敗しました: ' + error.message)
   }
 
-  // 2. 待機中のグループ（メンバーが1人だけ）を探す
-  const { data: allGroupMembers } = await supabase
-    .from('group_members')
-    .select('group_id')
-
-  if (allGroupMembers) {
-    // グループごとのメンバー数をカウント
-    const groupCounts = new Map<string, number>()
-    allGroupMembers.forEach(member => {
-      const count = groupCounts.get(member.group_id) || 0
-      groupCounts.set(member.group_id, count + 1)
-    })
-
-    // メンバーが1人だけのグループを探す
-    for (const [groupId, count] of Array.from(groupCounts.entries())) {
-      if (count === 1) {
-        // 待機中のグループに参加
-        const { data: members } = await supabase
-          .from('group_members')
-          .select('user_id, profiles(name)')
-          .eq('group_id', groupId)
-
-        if (members && members.length === 1) {
-          // 自分を追加
-          await supabase
-            .from('group_members')
-            .insert({
-              group_id: groupId,
-              user_id: userId
-            })
-
-          // グループ名を更新
-          const partner = members[0]
-          const partnerName = (partner.profiles as any).name
-          const newGroupName = generateGroupName(partnerName, userName)
-
-          await supabase
-            .from('groups')
-            .update({ name: newGroupName })
-            .eq('id', groupId)
-
-          return groupId
-        }
-      }
-    }
-  }
-
-  // 3. 新しいグループを作成（メンバーは自分のみ、待機状態）
-  const { data: newGroup, error: groupError } = await supabase
-    .from('groups')
-    .insert({
-      name: `${userName} (待機中)`
-    })
-    .select()
-    .single()
-
-  if (groupError || !newGroup) {
-    throw new Error('グループ作成に失敗しました')
-  }
-
-  // 自分をメンバーに追加
-  await supabase
-    .from('group_members')
-    .insert({
-      group_id: newGroup.id,
-      user_id: userId
-    })
-
-  return newGroup.id
+  return data as string
 }
 
-export async function updateGroupName(
-  groupId: string,
-  user1Name: string,
-  user2Name: string
-): Promise<void> {
-  const newName = generateGroupName(user1Name, user2Name)
+/**
+ * グループ名を再計算して更新
+ * DB関数 update_group_name_if_ready() を呼び出す
+ */
+export async function updateGroupName(groupId: string): Promise<void> {
+  const { error } = await supabase.rpc('update_group_name_if_ready', {
+    p_group_id: groupId,
+  })
 
-  await supabase
-    .from('groups')
-    .update({ name: newName })
-    .eq('id', groupId)
+  if (error) {
+    throw new Error('グループ名の更新に失敗しました: ' + error.message)
+  }
 }

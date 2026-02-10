@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { getCurrentUser } from '@/lib/auth'
 import { getCurrentUserState, getPartnerState, upsertUserState } from '@/lib/services/state'
+import { updateLastSeen, getPartnerLastSeen, formatLastSeen } from '@/lib/services/reads'
 import { getPartnerUser } from '@/lib/group'
 import { MoodScore, MoodLabels, TalkStateLabels, LifeStatusLabels } from '@/types'
 
@@ -15,6 +16,7 @@ export default function StatePage() {
   const [myState, setMyState] = useState<any>(null)
   const [partnerState, setPartnerState] = useState<any>(null)
   const [partner, setPartner] = useState<any>(null)
+  const [partnerLastSeen, setPartnerLastSeen] = useState<string>('')
 
   // フォーム状態
   const [mood, setMood] = useState<MoodScore | undefined>()
@@ -34,22 +36,31 @@ export default function StatePage() {
         return
       }
 
-      const [state, pState, pUser] = await Promise.all([
+      // 自分の画面閲覧を記録
+      await updateLastSeen(user.id, 'state')
+
+      const [state, pState, pUser, lastSeen] = await Promise.all([
         getCurrentUserState(user.id),
         getPartnerState(user.id),
-        getPartnerUser(user.id)
+        getPartnerUser(user.id),
+        getPartnerLastSeen(user.id, 'state'),
       ])
 
       setMyState(state)
       setPartnerState(pState)
       setPartner(pUser)
 
+      if (lastSeen) {
+        setPartnerLastSeen(formatLastSeen(lastSeen))
+      }
+
       // フォームに現在の値をセット
       if (state) {
-        setMood(state.mood)
-        setNote(state.note || '')
-        setTalkState(state.talkState || '')
-        setLifeStatus(state.lifeStatus || '')
+        const data = state.stateData
+        setMood(data.mood as MoodScore | undefined)
+        setNote(data.note || '')
+        setTalkState(data.talkState || '')
+        setLifeStatus(data.lifeStatus || '')
       }
     } catch (error) {
       console.error(error)
@@ -68,7 +79,7 @@ export default function StatePage() {
         mood,
         note,
         talkState: talkState as any,
-        lifeStatus: lifeStatus as any
+        lifeStatus: lifeStatus as any,
       })
 
       await loadData()
@@ -91,11 +102,16 @@ export default function StatePage() {
       {/* パートナーの状態 */}
       {partner && partnerState && (
         <div style={{ marginTop: '20px', padding: '15px', backgroundColor: '#FFF0F5', borderRadius: '8px' }}>
-          <h3>{partner.name}の状態</h3>
-          <p>機嫌: {partnerState.mood ? MoodLabels[partnerState.mood as MoodScore] : '未設定'}</p>
-          <p>話せる: {partnerState.talkState ? TalkStateLabels[partnerState.talkState as keyof typeof TalkStateLabels] : '未設定'}</p>
-          <p>状況: {partnerState.lifeStatus ? LifeStatusLabels[partnerState.lifeStatus as keyof typeof LifeStatusLabels] : '未設定'}</p>
-          {partnerState.note && <p>メモ: {partnerState.note}</p>}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <h3>{partner.name}の状態</h3>
+            {partnerLastSeen && (
+              <span style={{ fontSize: '12px', color: '#999' }}>{partnerLastSeen}に閲覧</span>
+            )}
+          </div>
+          <p>機嫌: {partnerState.stateData.mood ? MoodLabels[partnerState.stateData.mood as MoodScore] : '未設定'}</p>
+          <p>話せる: {partnerState.stateData.talkState ? TalkStateLabels[partnerState.stateData.talkState as keyof typeof TalkStateLabels] : '未設定'}</p>
+          <p>状況: {partnerState.stateData.lifeStatus ? LifeStatusLabels[partnerState.stateData.lifeStatus as keyof typeof LifeStatusLabels] : '未設定'}</p>
+          {partnerState.stateData.note && <p>メモ: {partnerState.stateData.note}</p>}
           <p style={{ fontSize: '12px', color: '#999', marginTop: '10px' }}>
             更新: {new Date(partnerState.updatedAt).toLocaleString('ja-JP')}
           </p>

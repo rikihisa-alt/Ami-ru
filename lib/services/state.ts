@@ -1,10 +1,22 @@
 /**
- * State管理サービス
+ * State Service - JSONB版
+ * state_currentテーブルはstate_json列にすべてのデータを保存
  */
 
 import { supabase } from '../supabase/client'
-import type { UserState } from '@/types'
+import { StateData, stateSchema } from '../validation/state'
 
+export interface UserState {
+  id: string
+  groupId: string
+  userId: string
+  stateData: StateData
+  updatedAt: Date
+}
+
+/**
+ * 現在のユーザーの状態を取得
+ */
 export async function getCurrentUserState(userId: string): Promise<UserState | null> {
   const { data, error } = await supabase
     .from('state_current')
@@ -12,105 +24,100 @@ export async function getCurrentUserState(userId: string): Promise<UserState | n
     .eq('user_id', userId)
     .single()
 
-  if (error) {
-    if (error.code === 'PGRST116') {
-      return null // レコードが存在しない
-    }
-    throw error
-  }
-
-  return data ? mapStateFromDB(data) : null
-}
-
-export async function getPartnerState(currentUserId: string): Promise<UserState | null> {
-  // まず現在のユーザーのグループを取得
-  const { data: groupMembers } = await supabase
-    .from('group_members')
-    .select('group_id, user_id')
-    .eq('user_id', currentUserId)
-
-  if (!groupMembers || groupMembers.length === 0) {
+  if (error || !data) {
     return null
   }
 
-  const groupId = groupMembers[0].group_id
+  return {
+    id: data.id,
+    groupId: data.group_id,
+    userId: data.user_id,
+    stateData: data.state_json || {},
+    updatedAt: new Date(data.updated_at),
+  }
+}
 
-  // 同じグループの別のユーザーを取得
-  const { data: partnerMembers } = await supabase
+/**
+ * パートナーの状態を取得
+ */
+export async function getPartnerState(currentUserId: string): Promise<UserState | null> {
+  // 自分のグループIDを取得
+  const { data: membership } = await supabase
+    .from('group_members')
+    .select('group_id')
+    .eq('user_id', currentUserId)
+    .single()
+
+  if (!membership) return null
+
+  // 同じグループで自分以外のメンバーを取得
+  const { data: partner } = await supabase
     .from('group_members')
     .select('user_id')
-    .eq('group_id', groupId)
+    .eq('group_id', membership.group_id)
     .neq('user_id', currentUserId)
+    .single()
 
-  if (!partnerMembers || partnerMembers.length === 0) {
-    return null
-  }
+  if (!partner) return null
 
-  const partnerId = partnerMembers[0].user_id
-
-  return getCurrentUserState(partnerId)
+  // パートナーの状態を取得
+  return getCurrentUserState(partner.user_id)
 }
 
+/**
+ * ユーザーの状態を更新（Upsert）
+ */
 export async function upsertUserState(
   userId: string,
-  state: Partial<Omit<UserState, 'id' | 'userId' | 'updatedAt'>>
+  stateData: Partial<StateData>
 ): Promise<UserState> {
-  const dbState = mapStateToDB(state)
+  // zodでバリデーション
+  const validated = stateSchema.partial().parse(stateData)
+
+  // グループIDを取得
+  const { data: membership, error: membershipError } = await supabase
+    .from('group_members')
+    .select('group_id')
+    .eq('user_id', userId)
+    .single()
+
+  if (membershipError || !membership) {
+    throw new Error('グループが見つかりません')
+  }
+
+  // 既存の状態を取得
+  const existing = await getCurrentUserState(userId)
+
+  // 既存データとマージ
+  const mergedStateData = {
+    ...(existing?.stateData || {}),
+    ...validated,
+  }
 
   const { data, error } = await supabase
     .from('state_current')
-    .upsert({
-      user_id: userId,
-      ...dbState,
-      updated_at: new Date().toISOString()
-    })
+    .upsert(
+      {
+        user_id: userId,
+        group_id: membership.group_id,
+        state_json: mergedStateData,
+      },
+      {
+        onConflict: 'user_id',
+      }
+    )
     .select()
     .single()
 
-  if (error) throw error
+  if (error || !data) {
+    throw new Error('状態の更新に失敗しました: ' + error?.message)
+  }
 
-  return mapStateFromDB(data)
-}
-
-// DB → アプリ型変換
-function mapStateFromDB(data: any): UserState {
   return {
     id: data.id,
+    groupId: data.group_id,
     userId: data.user_id,
-    mood: data.mood,
-    moodReasonTags: data.mood_reason_tags,
-    note: data.note,
-    talkState: data.talk_state,
-    talkDepth: data.talk_depth,
-    talkStyle: data.talk_style,
-    distance: data.distance,
-    conflictTolerance: data.conflict_tolerance,
-    lifeStatus: data.life_status,
-    quietMode: data.quiet_mode,
-    soloUntil: data.solo_until ? new Date(data.solo_until) : undefined,
-    freeTime: data.free_time,
-    lifeTempo: data.life_tempo,
-    lifeNoise: data.life_noise,
-    updatedAt: new Date(data.updated_at)
-  }
-}
-
-// アプリ型 → DB変換
-function mapStateToDB(state: Partial<Omit<UserState, 'id' | 'userId' | 'updatedAt'>>): any {
-  return {
-    mood: state.mood,
-    mood_reason_tags: state.moodReasonTags,
-    note: state.note,
-    talk_state: state.talkState,
-    talk_depth: state.talkDepth,
-    talk_style: state.talkStyle,
-    distance: state.distance,
-    conflict_tolerance: state.conflictTolerance,
-    life_status: state.lifeStatus,
-    quiet_mode: state.quietMode,
-    solo_until: state.soloUntil?.toISOString(),
-    free_time: state.freeTime,
-    life_tempo: state.lifeTempo,
-    life_noise: state.lifeNoise
+    stateData: data.state_json || {},
+    updatedAt: new Date(data.updated_at),
   }
 }

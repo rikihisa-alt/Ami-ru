@@ -8,6 +8,7 @@ import { getCurrentUserState, getPartnerState } from '@/lib/services/state'
 import { getLogs } from '@/lib/services/logs'
 import { getRules } from '@/lib/services/rules'
 import { getFutureItems } from '@/lib/services/future'
+import { updateLastSeen, getPartnerLastSeen, formatLastSeen } from '@/lib/services/reads'
 import Link from 'next/link'
 import { MoodLabels, MoodScore } from '@/types'
 
@@ -22,6 +23,7 @@ export default function DashboardPage() {
   const [recentLogs, setRecentLogs] = useState<any[]>([])
   const [rules, setRules] = useState<any[]>([])
   const [futureItems, setFutureItems] = useState<any[]>([])
+  const [partnerLastSeen, setPartnerLastSeen] = useState<string>('')
 
   useEffect(() => {
     loadData()
@@ -37,17 +39,21 @@ export default function DashboardPage() {
 
       setUser(currentUser)
 
+      // ダッシュボード閲覧を記録
+      await updateLastSeen(currentUser.id, 'dashboard')
+
       const userGroup = await getCurrentUserGroup(currentUser.id)
       setGroup(userGroup)
 
       if (userGroup) {
-        const [partnerData, state, pState, logs, rulesData, future] = await Promise.all([
+        const [partnerData, state, pState, logs, rulesData, future, lastSeen] = await Promise.all([
           getPartnerUser(currentUser.id),
           getCurrentUserState(currentUser.id),
           getPartnerState(currentUser.id),
           getLogs(userGroup.id, 5),
           getRules(userGroup.id),
-          getFutureItems(userGroup.id, currentUser.id)
+          getFutureItems(userGroup.id, currentUser.id),
+          getPartnerLastSeen(currentUser.id, 'dashboard'),
         ])
 
         setPartner(partnerData)
@@ -56,6 +62,10 @@ export default function DashboardPage() {
         setRecentLogs(logs)
         setRules(rulesData.slice(0, 3))
         setFutureItems(future.slice(0, 3))
+
+        if (lastSeen) {
+          setPartnerLastSeen(formatLastSeen(lastSeen))
+        }
       }
     } catch (error) {
       console.error(error)
@@ -74,11 +84,16 @@ export default function DashboardPage() {
 
       {group && (
         <div style={{ marginTop: '20px', padding: '15px', backgroundColor: '#f5f5f5', borderRadius: '8px' }}>
-          <h2>{group.name}</h2>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <h2 style={{ margin: 0 }}>{group.name}</h2>
+            {partnerLastSeen && (
+              <span style={{ fontSize: '12px', color: '#999' }}>{partnerLastSeen}に閲覧</span>
+            )}
+          </div>
           {partner ? (
-            <p>パートナー: {partner.name}</p>
+            <p style={{ margin: '5px 0 0 0' }}>パートナー: {partner.name}</p>
           ) : (
-            <p>⏳ パートナー待機中...</p>
+            <p style={{ margin: '5px 0 0 0' }}>⏳ パートナー待機中...</p>
           )}
         </div>
       )}
@@ -88,27 +103,27 @@ export default function DashboardPage() {
         <h3>😊 状態</h3>
         <div style={{ display: 'grid', gap: '15px', marginTop: '15px' }}>
           <div style={{ padding: '15px', backgroundColor: '#FFE5EC', borderRadius: '8px' }}>
-            <h4>あなた</h4>
+            <h4 style={{ margin: '0 0 10px 0' }}>あなた</h4>
             {myState ? (
               <>
-                <p>機嫌: {myState.mood ? MoodLabels[myState.mood as MoodScore] : '未設定'}</p>
-                {myState.note && <p style={{ fontSize: '14px', color: '#666' }}>メモ: {myState.note}</p>}
+                <p style={{ margin: '5px 0' }}>機嫌: {myState.stateData.mood ? MoodLabels[myState.stateData.mood as MoodScore] : '未設定'}</p>
+                {myState.stateData.note && <p style={{ fontSize: '14px', color: '#666', margin: '5px 0' }}>メモ: {myState.stateData.note}</p>}
               </>
             ) : (
-              <p style={{ color: '#999' }}>未設定</p>
+              <p style={{ color: '#999', margin: '5px 0' }}>未設定</p>
             )}
           </div>
 
           {partner && (
             <div style={{ padding: '15px', backgroundColor: '#FFF0F5', borderRadius: '8px' }}>
-              <h4>{partner.name}</h4>
+              <h4 style={{ margin: '0 0 10px 0' }}>{partner.name}</h4>
               {partnerState ? (
                 <>
-                  <p>機嫌: {partnerState.mood ? MoodLabels[partnerState.mood as MoodScore] : '未設定'}</p>
-                  {partnerState.note && <p style={{ fontSize: '14px', color: '#666' }}>メモ: {partnerState.note}</p>}
+                  <p style={{ margin: '5px 0' }}>機嫌: {partnerState.stateData.mood ? MoodLabels[partnerState.stateData.mood as MoodScore] : '未設定'}</p>
+                  {partnerState.stateData.note && <p style={{ fontSize: '14px', color: '#666', margin: '5px 0' }}>メモ: {partnerState.stateData.note}</p>}
                 </>
               ) : (
-                <p style={{ color: '#999' }}>未設定</p>
+                <p style={{ color: '#999', margin: '5px 0' }}>未設定</p>
               )}
             </div>
           )}
@@ -159,22 +174,22 @@ export default function DashboardPage() {
 
       {/* ナビゲーション */}
       <div style={{ marginTop: '30px', display: 'grid', gap: '15px' }}>
-        <Link href="/state" style={{ display: 'block', padding: '20px', backgroundColor: '#FF6B9D', color: 'white', borderRadius: '8px', textAlign: 'center', fontSize: '18px', fontWeight: 'bold' }}>
+        <Link href="/state" style={{ display: 'block', padding: '20px', backgroundColor: '#FF6B9D', color: 'white', borderRadius: '8px', textAlign: 'center', fontSize: '18px', fontWeight: 'bold', textDecoration: 'none' }}>
           😊 状態
         </Link>
-        <Link href="/logs" style={{ display: 'block', padding: '20px', backgroundColor: '#FFC2D4', color: '#333', borderRadius: '8px', textAlign: 'center', fontSize: '18px', fontWeight: 'bold' }}>
+        <Link href="/logs" style={{ display: 'block', padding: '20px', backgroundColor: '#FFC2D4', color: '#333', borderRadius: '8px', textAlign: 'center', fontSize: '18px', fontWeight: 'bold', textDecoration: 'none' }}>
           📝 ログ・メモ
         </Link>
-        <Link href="/rules" style={{ display: 'block', padding: '20px', backgroundColor: '#FFE5EC', color: '#333', borderRadius: '8px', textAlign: 'center', fontSize: '18px', fontWeight: 'bold' }}>
+        <Link href="/rules" style={{ display: 'block', padding: '20px', backgroundColor: '#FFE5EC', color: '#333', borderRadius: '8px', textAlign: 'center', fontSize: '18px', fontWeight: 'bold', textDecoration: 'none' }}>
           📋 ルール
         </Link>
-        <Link href="/future" style={{ display: 'block', padding: '20px', backgroundColor: '#FFF0F5', color: '#333', borderRadius: '8px', textAlign: 'center', fontSize: '18px', fontWeight: 'bold' }}>
+        <Link href="/future" style={{ display: 'block', padding: '20px', backgroundColor: '#FFF0F5', color: '#333', borderRadius: '8px', textAlign: 'center', fontSize: '18px', fontWeight: 'bold', textDecoration: 'none' }}>
           🎉 未来
         </Link>
       </div>
 
       <div style={{ marginTop: '30px', textAlign: 'center' }}>
-        <Link href="/settings" style={{ color: '#666' }}>⚙️ 設定</Link>
+        <Link href="/settings" style={{ color: '#666', textDecoration: 'none' }}>⚙️ 設定</Link>
       </div>
     </div>
   )

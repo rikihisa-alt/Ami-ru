@@ -42,33 +42,15 @@ CREATE INDEX idx_group_members_group ON group_members(group_id);
 CREATE INDEX idx_group_members_user ON group_members(user_id);
 
 -- ========================================
--- State Current (現在の状態)
+-- State Current (現在の状態) - JSONB版
 -- ========================================
 CREATE TABLE state_current (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  group_id UUID NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
   user_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
 
-  -- 機嫌関連
-  mood INTEGER CHECK (mood >= 1 AND mood <= 5), -- 1:最悪 ~ 5:最高
-  mood_reason_tags TEXT[], -- 理由タグ（複数）
-  note TEXT, -- 補足メモ
-
-  -- 会話関連
-  talk_state TEXT CHECK (talk_state IN ('ok', 'later', 'no')), -- 話せる状態
-  talk_depth TEXT CHECK (talk_depth IN ('light', 'normal', 'deep')), -- 会話の深さ
-  talk_style TEXT CHECK (talk_style IN ('casual', 'serious', 'gentle')), -- 話し方希望
-
-  -- 距離感・関係性
-  distance TEXT CHECK (distance IN ('close', 'normal', 'need_space')), -- 距離感
-  conflict_tolerance TEXT CHECK (conflict_tolerance IN ('high', 'medium', 'low')), -- ケンカ耐性
-
-  -- 生活状況
-  life_status TEXT CHECK (life_status IN ('home', 'work', 'out', 'sleeping')), -- 在宅状況
-  quiet_mode BOOLEAN DEFAULT FALSE, -- 静かモード
-  solo_until TIMESTAMPTZ, -- ソロ時間（〜時まで）
-  free_time TEXT CHECK (free_time IN ('none', 'little', 'some', 'plenty')), -- 余白時間
-  life_tempo TEXT CHECK (life_tempo IN ('slow', 'normal', 'fast')), -- 生活テンポ
-  life_noise TEXT, -- 生活ノイズ予告（自由記述）
+  -- すべての状態情報をJSONBで保存
+  state_json JSONB DEFAULT '{}'::jsonb,
 
   updated_at TIMESTAMPTZ DEFAULT NOW(),
 
@@ -76,7 +58,9 @@ CREATE TABLE state_current (
 );
 
 CREATE INDEX idx_state_current_user ON state_current(user_id);
+CREATE INDEX idx_state_current_group ON state_current(group_id);
 CREATE INDEX idx_state_current_updated ON state_current(updated_at DESC);
+CREATE INDEX idx_state_current_json ON state_current USING GIN (state_json);
 
 -- ========================================
 -- Logs (ログ・メモ)
@@ -249,6 +233,125 @@ CREATE TRIGGER update_future_items_updated_at BEFORE UPDATE ON future_items
   FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 -- ========================================
+-- DB Functions for Group Management
+-- ========================================
+
+-- グループを確保してメンバーシップを確保する関数
+-- 2人揃ったら "A と B" にグループ名を更新
+CREATE OR REPLACE FUNCTION ensure_group_and_membership()
+RETURNS UUID
+SECURITY DEFINER
+AS $$
+DECLARE
+  v_user_id UUID;
+  v_group_id UUID;
+  v_waiting_group_id UUID;
+  v_member_count INTEGER;
+  v_user_name TEXT;
+  v_partner_name TEXT;
+  v_new_group_name TEXT;
+BEGIN
+  -- 現在のユーザーIDを取得
+  v_user_id := auth.uid();
+
+  IF v_user_id IS NULL THEN
+    RAISE EXCEPTION 'Not authenticated';
+  END IF;
+
+  -- 既存のグループメンバーシップをチェック
+  SELECT group_id INTO v_group_id
+  FROM group_members
+  WHERE user_id = v_user_id
+  LIMIT 1;
+
+  -- 既に所属していればそのgroup_idを返す
+  IF v_group_id IS NOT NULL THEN
+    RETURN v_group_id;
+  END IF;
+
+  -- 待機中のグループ（メンバーが1人だけ）を探す
+  SELECT gm.group_id INTO v_waiting_group_id
+  FROM group_members gm
+  GROUP BY gm.group_id
+  HAVING COUNT(*) = 1
+  LIMIT 1;
+
+  -- 待機中のグループが見つかった場合、参加する
+  IF v_waiting_group_id IS NOT NULL THEN
+    -- 自分を追加
+    INSERT INTO group_members (group_id, user_id)
+    VALUES (v_waiting_group_id, v_user_id);
+
+    -- グループ名を "A と B" 形式に更新
+    PERFORM update_group_name_if_ready(v_waiting_group_id);
+
+    RETURN v_waiting_group_id;
+  END IF;
+
+  -- 待機中のグループがなければ新規作成
+  SELECT name INTO v_user_name
+  FROM profiles
+  WHERE id = v_user_id;
+
+  INSERT INTO groups (name)
+  VALUES (v_user_name || ' (待機中)')
+  RETURNING id INTO v_group_id;
+
+  -- 自分をメンバーに追加
+  INSERT INTO group_members (group_id, user_id)
+  VALUES (v_group_id, v_user_id);
+
+  RETURN v_group_id;
+END;
+$$ LANGUAGE plpgsql;
+
+-- グループメンバーが2人揃ったら "A と B" 形式に名前を更新
+CREATE OR REPLACE FUNCTION update_group_name_if_ready(p_group_id UUID)
+RETURNS VOID
+SECURITY DEFINER
+AS $$
+DECLARE
+  v_member_count INTEGER;
+  v_name1 TEXT;
+  v_name2 TEXT;
+  v_new_name TEXT;
+BEGIN
+  -- メンバー数を確認
+  SELECT COUNT(*) INTO v_member_count
+  FROM group_members
+  WHERE group_id = p_group_id;
+
+  -- 2人揃っていない場合は何もしない
+  IF v_member_count <> 2 THEN
+    RETURN;
+  END IF;
+
+  -- 2人の名前を取得
+  SELECT p.name INTO v_name1
+  FROM group_members gm
+  JOIN profiles p ON gm.user_id = p.id
+  WHERE gm.group_id = p_group_id
+  ORDER BY gm.joined_at ASC
+  LIMIT 1;
+
+  SELECT p.name INTO v_name2
+  FROM group_members gm
+  JOIN profiles p ON gm.user_id = p.id
+  WHERE gm.group_id = p_group_id
+  ORDER BY gm.joined_at ASC
+  OFFSET 1
+  LIMIT 1;
+
+  -- グループ名を "A と B" 形式に更新
+  v_new_name := v_name1 || ' と ' || v_name2;
+
+  UPDATE groups
+  SET name = v_new_name
+  WHERE id = p_group_id;
+END;
+$$ LANGUAGE plpgsql;
+
+-- ========================================
 -- Row Level Security (RLS)
 -- ========================================
 
@@ -275,16 +378,16 @@ CREATE POLICY "Users can view group members of their groups"
   ON group_members FOR SELECT
   USING (group_id IN (SELECT group_id FROM group_members WHERE user_id = auth.uid()));
 
+CREATE POLICY "Users can insert group members"
+  ON group_members FOR INSERT
+  WITH CHECK (user_id = auth.uid());
+
 -- State Current
 ALTER TABLE state_current ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "Users can view state in their group"
   ON state_current FOR SELECT
-  USING (user_id IN (
-    SELECT gm2.user_id FROM group_members gm1
-    JOIN group_members gm2 ON gm1.group_id = gm2.group_id
-    WHERE gm1.user_id = auth.uid()
-  ));
+  USING (group_id IN (SELECT group_id FROM group_members WHERE user_id = auth.uid()));
 
 CREATE POLICY "Users can manage own state"
   ON state_current FOR ALL
@@ -351,39 +454,51 @@ CREATE POLICY "Users can manage own reads"
 -- Initial Data / Templates
 -- ========================================
 
--- 同棲チェックリストのテンプレート項目を挿入する関数
+-- 同棲チェックリストのテンプレート項目を挿入する関数（20+項目）
 CREATE OR REPLACE FUNCTION initialize_checklist_for_group(p_group_id UUID)
 RETURNS VOID AS $$
 BEGIN
   INSERT INTO checklist_items (group_id, category, question) VALUES
-    -- お金
+    -- お金（7項目）
     (p_group_id, 'money', '家賃の分担方法'),
     (p_group_id, 'money', '食費の分担方法'),
     (p_group_id, 'money', '光熱費の分担方法'),
     (p_group_id, 'money', '高額支出の相談基準（いくらから？）'),
     (p_group_id, 'money', 'プレゼント予算感'),
     (p_group_id, 'money', '貯金の方針'),
+    (p_group_id, 'money', '共同口座を作るか'),
 
-    -- 家事
+    -- 家事（8項目）
     (p_group_id, 'chore', '料理の分担'),
     (p_group_id, 'chore', '皿洗いの分担'),
     (p_group_id, 'chore', '洗濯の分担'),
     (p_group_id, 'chore', '掃除の分担'),
     (p_group_id, 'chore', '買い物の分担'),
     (p_group_id, 'chore', 'ゴミ出しの分担'),
+    (p_group_id, 'chore', 'トイレ掃除の分担'),
+    (p_group_id, 'chore', '食材管理・在庫チェックの担当'),
 
-    -- 生活習慣
+    -- 生活習慣（10項目）
     (p_group_id, 'lifestyle', '起床・就寝時間'),
     (p_group_id, 'lifestyle', '休日の過ごし方'),
     (p_group_id, 'lifestyle', '友人を家に呼ぶルール'),
     (p_group_id, 'lifestyle', '実家への帰省頻度'),
     (p_group_id, 'lifestyle', 'ペットを飼うか'),
+    (p_group_id, 'lifestyle', '寝室を分けるか'),
+    (p_group_id, 'lifestyle', '冷暖房の温度設定'),
+    (p_group_id, 'lifestyle', '騒音・物音への配慮'),
+    (p_group_id, 'lifestyle', '共有スペースの使い方'),
+    (p_group_id, 'lifestyle', '食事は一緒に食べるか'),
 
-    -- コミュニケーション
+    -- コミュニケーション（8項目）
     (p_group_id, 'communication', 'ケンカした時のルール'),
     (p_group_id, 'communication', '一人の時間の確保'),
     (p_group_id, 'communication', 'スマホの扱い（見る？見ない？）'),
-    (p_group_id, 'communication', '記念日の重要度');
+    (p_group_id, 'communication', '記念日の重要度'),
+    (p_group_id, 'communication', '連絡頻度の期待値'),
+    (p_group_id, 'communication', '相手の親との関わり方'),
+    (p_group_id, 'communication', '異性の友人との付き合い方'),
+    (p_group_id, 'communication', '将来の話（結婚・子ども）をするタイミング');
 END;
 $$ LANGUAGE plpgsql;
 
