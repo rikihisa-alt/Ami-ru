@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
+import { Heart, FileText, BookOpen, Sparkles } from 'lucide-react'
 import { getCurrentUser } from '@/lib/auth'
 import { getCurrentUserGroup, getPartnerUser } from '@/lib/group'
 import { getCurrentUserState, getPartnerState } from '@/lib/services/state'
@@ -12,8 +14,12 @@ import { upsertRead, getPartnerReads, formatLastSeen } from '@/lib/services/read
 import { getPartnerUpdatedAtByDomain } from '@/lib/services/updateTracker'
 import { computeNewBadges, NewBadges } from '@/lib/services/notificationLikeService'
 import { supabase } from '@/lib/supabase/client'
-import Link from 'next/link'
 import { MoodLabels, MoodScore } from '@/types'
+import { AppShell } from '@/components/layout/app-shell'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Badge } from '@/components/ui/badge'
+import { Skeleton } from '@/components/ui/skeleton'
+import { EmptyState } from '@/components/ui/empty-state'
 
 export default function DashboardPage() {
   const router = useRouter()
@@ -96,7 +102,6 @@ export default function DashboardPage() {
         setPartnerReadsFormatted(formatted)
 
         // 新着バッジを計算
-        // 自分自身のreadsを取得
         const { data: myReadsData } = await supabase
           .from('reads')
           .select('*')
@@ -120,161 +125,212 @@ export default function DashboardPage() {
   }
 
   if (loading) {
-    return <div style={{ padding: '20px', textAlign: 'center' }}>読み込み中...</div>
+    return (
+      <AppShell title="ホーム">
+        <div className="space-y-4">
+          <Skeleton className="h-32 w-full" />
+          <Skeleton className="h-48 w-full" />
+          <Skeleton className="h-32 w-full" />
+        </div>
+      </AppShell>
+    )
   }
 
   return (
-    <div style={{ maxWidth: '600px', margin: '0 auto', padding: '20px' }}>
-      <h1>📱 Ami-ru</h1>
+    <AppShell title="ホーム">
+      <div className="space-y-6">
+        {/* グループ情報 */}
+        {group && (
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-lg">{group.name}</CardTitle>
+                {partnerLastSeenDashboard && (
+                  <span className="text-xs text-muted-foreground">
+                    {partnerLastSeenDashboard}に閲覧
+                  </span>
+                )}
+              </div>
+            </CardHeader>
+            <CardContent>
+              {partner ? (
+                <div className="space-y-4">
+                  <p className="text-sm">パートナー: {partner.name}</p>
+                  {Object.keys(partnerReadsFormatted).length > 0 && (
+                    <div className="space-y-2 rounded-xl bg-muted/50 p-4">
+                      <p className="text-xs font-semibold text-muted-foreground">
+                        相手の最終閲覧
+                      </p>
+                      {partnerReadsFormatted.state && (
+                        <p className="text-xs">😊 状態: {partnerReadsFormatted.state}</p>
+                      )}
+                      {partnerReadsFormatted.logs && (
+                        <p className="text-xs">📝 ログ: {partnerReadsFormatted.logs}</p>
+                      )}
+                      {partnerReadsFormatted.rules && (
+                        <p className="text-xs">📋 ルール: {partnerReadsFormatted.rules}</p>
+                      )}
+                      {partnerReadsFormatted.future && (
+                        <p className="text-xs">🎉 未来: {partnerReadsFormatted.future}</p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <p className="text-sm text-muted-foreground">⏳ パートナー待機中...</p>
+              )}
+            </CardContent>
+          </Card>
+        )}
 
-      {group && (
-        <div style={{ marginTop: '20px', padding: '15px', backgroundColor: '#f5f5f5', borderRadius: '8px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <h2 style={{ margin: 0 }}>{group.name}</h2>
-            {partnerLastSeenDashboard && (
-              <span style={{ fontSize: '12px', color: '#999' }}>{partnerLastSeenDashboard}に閲覧</span>
-            )}
-          </div>
-          {partner ? (
-            <>
-              <p style={{ margin: '5px 0 0 0' }}>パートナー: {partner.name}</p>
-              {Object.keys(partnerReadsFormatted).length > 0 && (
-                <div style={{ marginTop: '10px', fontSize: '12px', color: '#666' }}>
-                  <p style={{ fontWeight: 'bold', margin: '5px 0' }}>相手の最終閲覧:</p>
-                  {partnerReadsFormatted.state && <p style={{ margin: '2px 0' }}>😊 状態: {partnerReadsFormatted.state}</p>}
-                  {partnerReadsFormatted.logs && <p style={{ margin: '2px 0' }}>📝 ログ: {partnerReadsFormatted.logs}</p>}
-                  {partnerReadsFormatted.rules && <p style={{ margin: '2px 0' }}>📋 ルール: {partnerReadsFormatted.rules}</p>}
-                  {partnerReadsFormatted.future && <p style={{ margin: '2px 0' }}>🎉 未来: {partnerReadsFormatted.future}</p>}
+        {/* 状態 */}
+        <Card>
+          <CardHeader>
+            <div className="flex items-center gap-2">
+              <Heart className="h-5 w-5 text-primary" />
+              <CardTitle>状態</CardTitle>
+              {newBadges.stateNew && <Badge variant="new">New</Badge>}
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="grid gap-4">
+              {/* 自分の状態 */}
+              <div className="rounded-xl bg-primary/10 p-4">
+                <h4 className="mb-2 font-semibold">あなた</h4>
+                {myState ? (
+                  <div className="space-y-1">
+                    <p className="text-sm">
+                      機嫌: {myState.stateData.mood ? MoodLabels[myState.stateData.mood as MoodScore] : '未設定'}
+                    </p>
+                    {myState.stateData.note && (
+                      <p className="text-xs text-muted-foreground">
+                        メモ: {myState.stateData.note}
+                      </p>
+                    )}
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted-foreground">未設定</p>
+                )}
+              </div>
+
+              {/* パートナーの状態 */}
+              {partner && (
+                <div className="rounded-xl bg-pink-50 p-4">
+                  <h4 className="mb-2 font-semibold">{partner.name}</h4>
+                  {partnerState ? (
+                    <div className="space-y-1">
+                      <p className="text-sm">
+                        機嫌: {partnerState.stateData.mood ? MoodLabels[partnerState.stateData.mood as MoodScore] : '未設定'}
+                      </p>
+                      {partnerState.stateData.note && (
+                        <p className="text-xs text-muted-foreground">
+                          メモ: {partnerState.stateData.note}
+                        </p>
+                      )}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">未設定</p>
+                  )}
                 </div>
               )}
-            </>
-          ) : (
-            <p style={{ margin: '5px 0 0 0' }}>⏳ パートナー待機中...</p>
-          )}
-        </div>
-      )}
-
-      {/* 状態カード */}
-      <div style={{ marginTop: '30px' }}>
-        <h3>
-          😊 状態
-          {newBadges.stateNew && (
-            <span style={{ marginLeft: '10px', padding: '2px 8px', backgroundColor: '#FF6B9D', color: 'white', borderRadius: '12px', fontSize: '12px', fontWeight: 'bold' }}>
-              New
-            </span>
-          )}
-        </h3>
-        <div style={{ display: 'grid', gap: '15px', marginTop: '15px' }}>
-          <div style={{ padding: '15px', backgroundColor: '#FFE5EC', borderRadius: '8px' }}>
-            <h4 style={{ margin: '0 0 10px 0' }}>あなた</h4>
-            {myState ? (
-              <>
-                <p style={{ margin: '5px 0' }}>機嫌: {myState.stateData.mood ? MoodLabels[myState.stateData.mood as MoodScore] : '未設定'}</p>
-                {myState.stateData.note && <p style={{ fontSize: '14px', color: '#666', margin: '5px 0' }}>メモ: {myState.stateData.note}</p>}
-              </>
-            ) : (
-              <p style={{ color: '#999', margin: '5px 0' }}>未設定</p>
-            )}
-          </div>
-
-          {partner && (
-            <div style={{ padding: '15px', backgroundColor: '#FFF0F5', borderRadius: '8px' }}>
-              <h4 style={{ margin: '0 0 10px 0' }}>{partner.name}</h4>
-              {partnerState ? (
-                <>
-                  <p style={{ margin: '5px 0' }}>機嫌: {partnerState.stateData.mood ? MoodLabels[partnerState.stateData.mood as MoodScore] : '未設定'}</p>
-                  {partnerState.stateData.note && <p style={{ fontSize: '14px', color: '#666', margin: '5px 0' }}>メモ: {partnerState.stateData.note}</p>}
-                </>
-              ) : (
-                <p style={{ color: '#999', margin: '5px 0' }}>未設定</p>
-              )}
             </div>
-          )}
-        </div>
-      </div>
+          </CardContent>
+        </Card>
 
-      {/* ルール要点 */}
-      {rules.length > 0 && (
-        <div style={{ marginTop: '30px' }}>
-          <h3>
-            📋 ルール
-            {newBadges.rulesNew && (
-              <span style={{ marginLeft: '10px', padding: '2px 8px', backgroundColor: '#FF6B9D', color: 'white', borderRadius: '12px', fontSize: '12px', fontWeight: 'bold' }}>
-                New
-              </span>
-            )}
-          </h3>
-          <div style={{ marginTop: '15px' }}>
-            {rules.map(rule => (
-              <div key={rule.id} style={{ marginBottom: '10px', padding: '10px', backgroundColor: '#f5f5f5', borderRadius: '5px', fontSize: '14px' }}>
-                <strong>{rule.title}</strong>
+        {/* ルール */}
+        {rules.length > 0 && (
+          <Card>
+            <CardHeader>
+              <div className="flex items-center gap-2">
+                <BookOpen className="h-5 w-5 text-primary" />
+                <CardTitle>ルール</CardTitle>
+                {newBadges.rulesNew && <Badge variant="new">New</Badge>}
               </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* 最新ログ */}
-      {recentLogs.length > 0 && (
-        <div style={{ marginTop: '30px' }}>
-          <h3>
-            📝 最新ログ
-            {newBadges.logsNew && (
-              <span style={{ marginLeft: '10px', padding: '2px 8px', backgroundColor: '#FF6B9D', color: 'white', borderRadius: '12px', fontSize: '12px', fontWeight: 'bold' }}>
-                New
-              </span>
-            )}
-          </h3>
-          <div style={{ marginTop: '15px' }}>
-            {recentLogs.map(log => (
-              <div key={log.id} style={{ marginBottom: '10px', padding: '10px', backgroundColor: '#f5f5f5', borderRadius: '5px', fontSize: '14px' }}>
-                {log.content.substring(0, 50)}{log.content.length > 50 ? '...' : ''}
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-2">
+                {rules.map((rule) => (
+                  <div
+                    key={rule.id}
+                    className="rounded-xl bg-muted/50 p-3 text-sm font-medium"
+                  >
+                    {rule.title}
+                  </div>
+                ))}
+                <Link
+                  href="/rules"
+                  className="mt-2 block text-sm text-primary hover:underline"
+                >
+                  すべて見る →
+                </Link>
               </div>
-            ))}
-          </div>
-        </div>
-      )}
+            </CardContent>
+          </Card>
+        )}
 
-      {/* 未来カード */}
-      {futureItems.length > 0 && (
-        <div style={{ marginTop: '30px' }}>
-          <h3>
-            🎉 未来
-            {newBadges.futureNew && (
-              <span style={{ marginLeft: '10px', padding: '2px 8px', backgroundColor: '#FF6B9D', color: 'white', borderRadius: '12px', fontSize: '12px', fontWeight: 'bold' }}>
-                New
-              </span>
-            )}
-          </h3>
-          <div style={{ marginTop: '15px' }}>
-            {futureItems.map(item => (
-              <div key={item.id} style={{ marginBottom: '10px', padding: '10px', backgroundColor: '#f5f5f5', borderRadius: '5px', fontSize: '14px' }}>
-                {item.title}
+        {/* 最新ログ */}
+        {recentLogs.length > 0 && (
+          <Card>
+            <CardHeader>
+              <div className="flex items-center gap-2">
+                <FileText className="h-5 w-5 text-primary" />
+                <CardTitle>最新ログ</CardTitle>
+                {newBadges.logsNew && <Badge variant="new">New</Badge>}
               </div>
-            ))}
-          </div>
-        </div>
-      )}
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-2">
+                {recentLogs.map((log) => (
+                  <div
+                    key={log.id}
+                    className="rounded-xl bg-muted/50 p-3 text-sm"
+                  >
+                    {log.content.substring(0, 50)}
+                    {log.content.length > 50 ? '...' : ''}
+                  </div>
+                ))}
+                <Link
+                  href="/logs"
+                  className="mt-2 block text-sm text-primary hover:underline"
+                >
+                  すべて見る →
+                </Link>
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
-      {/* ナビゲーション */}
-      <div style={{ marginTop: '30px', display: 'grid', gap: '15px' }}>
-        <Link href="/state" style={{ display: 'block', padding: '20px', backgroundColor: '#FF6B9D', color: 'white', borderRadius: '8px', textAlign: 'center', fontSize: '18px', fontWeight: 'bold', textDecoration: 'none' }}>
-          😊 状態
-        </Link>
-        <Link href="/logs" style={{ display: 'block', padding: '20px', backgroundColor: '#FFC2D4', color: '#333', borderRadius: '8px', textAlign: 'center', fontSize: '18px', fontWeight: 'bold', textDecoration: 'none' }}>
-          📝 ログ・メモ
-        </Link>
-        <Link href="/rules" style={{ display: 'block', padding: '20px', backgroundColor: '#FFE5EC', color: '#333', borderRadius: '8px', textAlign: 'center', fontSize: '18px', fontWeight: 'bold', textDecoration: 'none' }}>
-          📋 ルール
-        </Link>
-        <Link href="/future" style={{ display: 'block', padding: '20px', backgroundColor: '#FFF0F5', color: '#333', borderRadius: '8px', textAlign: 'center', fontSize: '18px', fontWeight: 'bold', textDecoration: 'none' }}>
-          🎉 未来
-        </Link>
+        {/* 未来 */}
+        {futureItems.length > 0 && (
+          <Card>
+            <CardHeader>
+              <div className="flex items-center gap-2">
+                <Sparkles className="h-5 w-5 text-primary" />
+                <CardTitle>未来</CardTitle>
+                {newBadges.futureNew && <Badge variant="new">New</Badge>}
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-2">
+                {futureItems.map((item) => (
+                  <div
+                    key={item.id}
+                    className="rounded-xl bg-muted/50 p-3 text-sm"
+                  >
+                    {item.title}
+                  </div>
+                ))}
+                <Link
+                  href="/future"
+                  className="mt-2 block text-sm text-primary hover:underline"
+                >
+                  すべて見る →
+                </Link>
+              </div>
+            </CardContent>
+          </Card>
+        )}
       </div>
-
-      <div style={{ marginTop: '30px', textAlign: 'center' }}>
-        <Link href="/settings" style={{ color: '#666', textDecoration: 'none' }}>⚙️ 設定</Link>
-      </div>
-    </div>
+    </AppShell>
   )
 }

@@ -2,15 +2,22 @@
 
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import Link from 'next/link'
+import { Smile, Clock, Home, Save } from 'lucide-react'
 import { getCurrentUser } from '@/lib/auth'
 import { getCurrentUserState, getPartnerState, upsertUserState } from '@/lib/services/state'
 import { upsertRead, getPartnerLastSeen, formatLastSeen } from '@/lib/services/readService'
 import { getPartnerUser } from '@/lib/group'
 import { MoodScore, MoodLabels, TalkStateLabels, LifeStatusLabels } from '@/types'
+import { AppShell } from '@/components/layout/app-shell'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
+import { Textarea } from '@/components/ui/textarea'
+import { Skeleton } from '@/components/ui/skeleton'
+import { useToast } from '@/components/ui/toast-provider'
 
 export default function StatePage() {
   const router = useRouter()
+  const { showToast } = useToast()
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [myState, setMyState] = useState<any>(null)
@@ -64,12 +71,18 @@ export default function StatePage() {
       }
     } catch (error) {
       console.error(error)
+      showToast('error', 'データの読み込みに失敗しました')
     } finally {
       setLoading(false)
     }
   }
 
   const handleSave = async () => {
+    if (!mood) {
+      showToast('error', '機嫌を選択してください')
+      return
+    }
+
     setSaving(true)
     try {
       const user = await getCurrentUser()
@@ -83,121 +96,161 @@ export default function StatePage() {
       })
 
       await loadData()
-      alert('保存しました！')
+      showToast('success', '保存しました！')
     } catch (error: any) {
-      alert('保存に失敗しました: ' + error.message)
+      showToast('error', error.message || '保存に失敗しました')
     } finally {
       setSaving(false)
     }
   }
 
   if (loading) {
-    return <div style={{ padding: '20px', textAlign: 'center' }}>読み込み中...</div>
+    return (
+      <AppShell title="状態">
+        <div className="space-y-4">
+          <Skeleton className="h-40 w-full" />
+          <Skeleton className="h-64 w-full" />
+        </div>
+      </AppShell>
+    )
   }
 
   return (
-    <div style={{ maxWidth: '600px', margin: '0 auto', padding: '20px' }}>
-      <h1>😊 状態</h1>
+    <AppShell title="状態">
+      <div className="space-y-6">
+        {/* パートナーの状態 */}
+        {partner && partnerState && (
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-lg">{partner.name}の状態</CardTitle>
+                {partnerLastSeen && (
+                  <span className="text-xs text-muted-foreground">
+                    {partnerLastSeen}に閲覧
+                  </span>
+                )}
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-3">
+                <div className="flex items-center gap-2">
+                  <Smile className="h-4 w-4 text-primary" />
+                  <span className="text-sm font-medium">機嫌:</span>
+                  <span className="text-sm">
+                    {partnerState.stateData.mood
+                      ? MoodLabels[partnerState.stateData.mood as MoodScore]
+                      : '未設定'}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Clock className="h-4 w-4 text-primary" />
+                  <span className="text-sm font-medium">話せる:</span>
+                  <span className="text-sm">
+                    {partnerState.stateData.talkState
+                      ? TalkStateLabels[partnerState.stateData.talkState as keyof typeof TalkStateLabels]
+                      : '未設定'}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Home className="h-4 w-4 text-primary" />
+                  <span className="text-sm font-medium">状況:</span>
+                  <span className="text-sm">
+                    {partnerState.stateData.lifeStatus
+                      ? LifeStatusLabels[partnerState.stateData.lifeStatus as keyof typeof LifeStatusLabels]
+                      : '未設定'}
+                  </span>
+                </div>
+                {partnerState.stateData.note && (
+                  <div className="mt-4 rounded-xl bg-muted/50 p-3">
+                    <p className="text-sm">メモ: {partnerState.stateData.note}</p>
+                  </div>
+                )}
+                <p className="mt-4 text-xs text-muted-foreground">
+                  更新: {new Date(partnerState.updatedAt).toLocaleString('ja-JP')}
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
-      {/* パートナーの状態 */}
-      {partner && partnerState && (
-        <div style={{ marginTop: '20px', padding: '15px', backgroundColor: '#FFF0F5', borderRadius: '8px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <h3>{partner.name}の状態</h3>
-            {partnerLastSeen && (
-              <span style={{ fontSize: '12px', color: '#999' }}>{partnerLastSeen}に閲覧</span>
-            )}
-          </div>
-          <p>機嫌: {partnerState.stateData.mood ? MoodLabels[partnerState.stateData.mood as MoodScore] : '未設定'}</p>
-          <p>話せる: {partnerState.stateData.talkState ? TalkStateLabels[partnerState.stateData.talkState as keyof typeof TalkStateLabels] : '未設定'}</p>
-          <p>状況: {partnerState.stateData.lifeStatus ? LifeStatusLabels[partnerState.stateData.lifeStatus as keyof typeof LifeStatusLabels] : '未設定'}</p>
-          {partnerState.stateData.note && <p>メモ: {partnerState.stateData.note}</p>}
-          <p style={{ fontSize: '12px', color: '#999', marginTop: '10px' }}>
-            更新: {new Date(partnerState.updatedAt).toLocaleString('ja-JP')}
-          </p>
-        </div>
-      )}
+        {/* 自分の状態編集 */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-lg">あなたの状態</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-4">
+              <div>
+                <label className="mb-2 block text-sm font-semibold">
+                  <Smile className="mb-1 inline h-4 w-4" /> 今日の機嫌
+                </label>
+                <select
+                  value={mood || ''}
+                  onChange={(e) => setMood(e.target.value ? Number(e.target.value) as MoodScore : undefined)}
+                  className="h-11 w-full rounded-xl border border-input bg-background px-3 text-sm"
+                >
+                  <option value="">選択してください</option>
+                  {Object.entries(MoodLabels).map(([value, label]) => (
+                    <option key={value} value={value}>{label}</option>
+                  ))}
+                </select>
+              </div>
 
-      {/* 自分の状態編集 */}
-      <div style={{ marginTop: '30px', padding: '20px', backgroundColor: '#f5f5f5', borderRadius: '8px' }}>
-        <h3>あなたの状態</h3>
+              <div>
+                <label className="mb-2 block text-sm font-semibold">
+                  <Clock className="mb-1 inline h-4 w-4" /> 話せる状態
+                </label>
+                <select
+                  value={talkState}
+                  onChange={(e) => setTalkState(e.target.value)}
+                  className="h-11 w-full rounded-xl border border-input bg-background px-3 text-sm"
+                >
+                  <option value="">選択してください</option>
+                  {Object.entries(TalkStateLabels).map(([value, label]) => (
+                    <option key={value} value={value}>{label}</option>
+                  ))}
+                </select>
+              </div>
 
-        <div style={{ marginTop: '15px' }}>
-          <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>今日の機嫌</label>
-          <select
-            value={mood || ''}
-            onChange={(e) => setMood(e.target.value ? Number(e.target.value) as MoodScore : undefined)}
-            style={{ width: '100%', padding: '10px', fontSize: '16px' }}
-          >
-            <option value="">選択してください</option>
-            {Object.entries(MoodLabels).map(([value, label]) => (
-              <option key={value} value={value}>{label}</option>
-            ))}
-          </select>
-        </div>
+              <div>
+                <label className="mb-2 block text-sm font-semibold">
+                  <Home className="mb-1 inline h-4 w-4" /> 在宅状況
+                </label>
+                <select
+                  value={lifeStatus}
+                  onChange={(e) => setLifeStatus(e.target.value)}
+                  className="h-11 w-full rounded-xl border border-input bg-background px-3 text-sm"
+                >
+                  <option value="">選択してください</option>
+                  {Object.entries(LifeStatusLabels).map(([value, label]) => (
+                    <option key={value} value={value}>{label}</option>
+                  ))}
+                </select>
+              </div>
 
-        <div style={{ marginTop: '15px' }}>
-          <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>話せる状態</label>
-          <select
-            value={talkState}
-            onChange={(e) => setTalkState(e.target.value)}
-            style={{ width: '100%', padding: '10px', fontSize: '16px' }}
-          >
-            <option value="">選択してください</option>
-            {Object.entries(TalkStateLabels).map(([value, label]) => (
-              <option key={value} value={value}>{label}</option>
-            ))}
-          </select>
-        </div>
+              <div>
+                <label className="mb-2 block text-sm font-semibold">補足メモ</label>
+                <Textarea
+                  value={note}
+                  onChange={(e) => setNote(e.target.value)}
+                  placeholder="今日の気分や理由など..."
+                  className="min-h-[100px]"
+                />
+              </div>
 
-        <div style={{ marginTop: '15px' }}>
-          <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>在宅状況</label>
-          <select
-            value={lifeStatus}
-            onChange={(e) => setLifeStatus(e.target.value)}
-            style={{ width: '100%', padding: '10px', fontSize: '16px' }}
-          >
-            <option value="">選択してください</option>
-            {Object.entries(LifeStatusLabels).map(([value, label]) => (
-              <option key={value} value={value}>{label}</option>
-            ))}
-          </select>
-        </div>
-
-        <div style={{ marginTop: '15px' }}>
-          <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>補足メモ</label>
-          <textarea
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-            placeholder="今日の気分や理由など..."
-            style={{ width: '100%', padding: '10px', fontSize: '16px', minHeight: '80px' }}
-          />
-        </div>
-
-        <button
-          onClick={handleSave}
-          disabled={saving}
-          style={{
-            marginTop: '15px',
-            width: '100%',
-            padding: '12px',
-            backgroundColor: '#FF6B9D',
-            color: 'white',
-            border: 'none',
-            borderRadius: '5px',
-            fontSize: '16px',
-            cursor: saving ? 'not-allowed' : 'pointer'
-          }}
-        >
-          {saving ? '保存中...' : '保存'}
-        </button>
+              <Button
+                onClick={handleSave}
+                disabled={saving}
+                className="w-full"
+                size="lg"
+              >
+                <Save className="mr-2 h-5 w-5" />
+                {saving ? '保存中...' : '保存'}
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
       </div>
-
-      <div style={{ marginTop: '30px' }}>
-        <Link href="/dashboard" style={{ color: '#FF6B9D' }}>
-          ← ダッシュボードに戻る
-        </Link>
-      </div>
-    </div>
+    </AppShell>
   )
 }

@@ -2,15 +2,26 @@
 
 import { useEffect, useState, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
-import Link from 'next/link'
+import { Plus, Search, FileText, Eye } from 'lucide-react'
 import { getCurrentUser } from '@/lib/auth'
 import { getLogs, createLog, updateLogVisibility } from '@/lib/services/logs'
 import { getCurrentUserGroup } from '@/lib/group'
 import { upsertRead } from '@/lib/services/readService'
 import { LogTypeLabels } from '@/types'
+import { AppShell } from '@/components/layout/app-shell'
+import { Card, CardContent } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
+import { Badge } from '@/components/ui/badge'
+import { Skeleton } from '@/components/ui/skeleton'
+import { EmptyState } from '@/components/ui/empty-state'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
+import { useToast } from '@/components/ui/toast-provider'
 
 export default function LogsPage() {
   const router = useRouter()
+  const { showToast } = useToast()
   const [loading, setLoading] = useState(true)
   const [logs, setLogs] = useState<any[]>([])
   const [tab, setTab] = useState<'all' | 'private'>('all')
@@ -25,6 +36,10 @@ export default function LogsPage() {
   const [content, setContent] = useState('')
   const [creating, setCreating] = useState(false)
 
+  // Confirm Dialog
+  const [confirmOpen, setConfirmOpen] = useState(false)
+  const [selectedLogId, setSelectedLogId] = useState<string | null>(null)
+
   useEffect(() => {
     loadData()
   }, [])
@@ -37,7 +52,6 @@ export default function LogsPage() {
         return
       }
 
-      // ログページ閲覧を記録
       await upsertRead(user.id, 'logs')
 
       const group = await getCurrentUserGroup(user.id)
@@ -47,13 +61,17 @@ export default function LogsPage() {
       setLogs(data)
     } catch (error) {
       console.error(error)
+      showToast('error', 'データの読み込みに失敗しました')
     } finally {
       setLoading(false)
     }
   }
 
   const handleCreate = async () => {
-    if (!content.trim()) return
+    if (!content.trim()) {
+      showToast('error', '内容を入力してください')
+      return
+    }
 
     setCreating(true)
     try {
@@ -74,37 +92,38 @@ export default function LogsPage() {
       setContent('')
       setShowForm(false)
       await loadData()
+      showToast('success', 'ログを作成しました')
     } catch (error: any) {
-      alert('作成に失敗しました: ' + error.message)
+      showToast('error', error.message || '作成に失敗しました')
     } finally {
       setCreating(false)
     }
   }
 
-  const handlePromoteToShared = async (logId: string) => {
+  const handlePromoteToShared = async () => {
+    if (!selectedLogId) return
+
     try {
-      await updateLogVisibility(logId, 'shared')
+      await updateLogVisibility(selectedLogId, 'shared')
       await loadData()
+      showToast('success', 'ログを共有に変更しました')
     } catch (error: any) {
-      alert('共有に失敗しました: ' + error.message)
+      showToast('error', error.message || '共有に失敗しました')
     }
   }
 
-  // クライアント側フィルタリング（NOTE: データ量が増えたらサーバー側で実装すること）
+  // クライアント側フィルタリング
   const filteredLogs = useMemo(() => {
     let result = logs
 
-    // タブフィルタ
     if (tab === 'private') {
       result = result.filter(log => log.visibility === 'private')
     }
 
-    // visibilityフィルタ
     if (filterVisibility !== 'all') {
       result = result.filter(log => log.visibility === filterVisibility)
     }
 
-    // キーワード検索
     if (searchKeyword.trim()) {
       const keyword = searchKeyword.toLowerCase()
       result = result.filter(log =>
@@ -116,181 +135,171 @@ export default function LogsPage() {
   }, [logs, tab, filterVisibility, searchKeyword])
 
   if (loading) {
-    return <div style={{ padding: '20px', textAlign: 'center' }}>読み込み中...</div>
+    return (
+      <AppShell title="ログ・メモ">
+        <div className="space-y-4">
+          <Skeleton className="h-20 w-full" />
+          <Skeleton className="h-40 w-full" />
+          <Skeleton className="h-32 w-full" />
+        </div>
+      </AppShell>
+    )
   }
 
   return (
-    <div style={{ maxWidth: '600px', margin: '0 auto', padding: '20px' }}>
-      <h1>📝 ログ・メモ</h1>
-
-      {/* タブ */}
-      <div style={{ marginTop: '20px', display: 'flex', gap: '10px' }}>
-        <button
-          onClick={() => setTab('all')}
-          style={{
-            flex: 1,
-            padding: '10px',
-            backgroundColor: tab === 'all' ? '#FF6B9D' : '#f5f5f5',
-            color: tab === 'all' ? 'white' : '#333',
-            border: 'none',
-            borderRadius: '5px',
-            cursor: 'pointer'
-          }}
-        >
-          すべて
-        </button>
-        <button
-          onClick={() => setTab('private')}
-          style={{
-            flex: 1,
-            padding: '10px',
-            backgroundColor: tab === 'private' ? '#FF6B9D' : '#f5f5f5',
-            color: tab === 'private' ? 'white' : '#333',
-            border: 'none',
-            borderRadius: '5px',
-            cursor: 'pointer'
-          }}
-        >
-          プライベートのみ
-        </button>
-      </div>
-
-      {/* 検索・フィルタ */}
-      <div style={{ marginTop: '20px', padding: '15px', backgroundColor: '#f5f5f5', borderRadius: '8px' }}>
-        <div style={{ marginBottom: '10px' }}>
-          <input
-            type="text"
-            placeholder="キーワード検索..."
-            value={searchKeyword}
-            onChange={(e) => setSearchKeyword(e.target.value)}
-            style={{ width: '100%', padding: '8px', fontSize: '14px', borderRadius: '5px', border: '1px solid #ddd' }}
-          />
-        </div>
-        <div>
-          <select
-            value={filterVisibility}
-            onChange={(e) => setFilterVisibility(e.target.value as any)}
-            style={{ width: '100%', padding: '8px', fontSize: '14px', borderRadius: '5px', border: '1px solid #ddd' }}
+    <AppShell title="ログ・メモ">
+      <div className="space-y-6">
+        {/* タブ */}
+        <div className="grid grid-cols-2 gap-3">
+          <Button
+            onClick={() => setTab('all')}
+            variant={tab === 'all' ? 'default' : 'outline'}
+            size="lg"
           >
-            <option value="all">すべて</option>
-            <option value="shared">共有のみ</option>
-            <option value="private">プライベートのみ</option>
-          </select>
+            すべて
+          </Button>
+          <Button
+            onClick={() => setTab('private')}
+            variant={tab === 'private' ? 'default' : 'outline'}
+            size="lg"
+          >
+            プライベートのみ
+          </Button>
         </div>
-      </div>
 
-      {/* 新規作成ボタン */}
-      <button
-        onClick={() => setShowForm(!showForm)}
-        style={{
-          marginTop: '20px',
-          width: '100%',
-          padding: '12px',
-          backgroundColor: '#FF6B9D',
-          color: 'white',
-          border: 'none',
-          borderRadius: '5px',
-          cursor: 'pointer'
-        }}
-      >
-        {showForm ? '閉じる' : '+ 新しいログを作成'}
-      </button>
-
-      {/* 作成フォーム */}
-      {showForm && (
-        <div style={{ marginTop: '20px', padding: '15px', backgroundColor: '#f5f5f5', borderRadius: '8px' }}>
-          <div style={{ marginBottom: '10px' }}>
-            <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>種類</label>
+        {/* 検索・フィルタ */}
+        <Card>
+          <CardContent className="space-y-4 pt-6">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                type="text"
+                placeholder="キーワード検索..."
+                value={searchKeyword}
+                onChange={(e) => setSearchKeyword(e.target.value)}
+                className="pl-10"
+              />
+            </div>
             <select
-              value={logType}
-              onChange={(e) => setLogType(e.target.value)}
-              style={{ width: '100%', padding: '10px', fontSize: '16px' }}
+              value={filterVisibility}
+              onChange={(e) => setFilterVisibility(e.target.value as any)}
+              className="h-11 w-full rounded-xl border border-input bg-background px-3 text-sm"
             >
-              {Object.entries(LogTypeLabels).map(([value, label]) => (
-                <option key={value} value={value}>{label}</option>
-              ))}
+              <option value="all">すべて</option>
+              <option value="shared">共有のみ</option>
+              <option value="private">プライベートのみ</option>
             </select>
-          </div>
+          </CardContent>
+        </Card>
 
-          <div style={{ marginBottom: '10px' }}>
-            <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>内容</label>
-            <textarea
-              value={content}
-              onChange={(e) => setContent(e.target.value)}
-              placeholder="ログの内容を入力..."
-              style={{ width: '100%', padding: '10px', fontSize: '16px', minHeight: '80px' }}
-            />
-          </div>
+        {/* 新規作成ボタン */}
+        <Button
+          onClick={() => setShowForm(!showForm)}
+          className="w-full"
+          size="lg"
+        >
+          <Plus className="mr-2 h-5 w-5" />
+          {showForm ? '閉じる' : '新しいログを作成'}
+        </Button>
 
-          <button
-            onClick={handleCreate}
-            disabled={creating}
-            style={{
-              width: '100%',
-              padding: '12px',
-              backgroundColor: '#FF6B9D',
-              color: 'white',
-              border: 'none',
-              borderRadius: '5px',
-              cursor: creating ? 'not-allowed' : 'pointer'
-            }}
-          >
-            {creating ? '作成中...' : '作成'}
-          </button>
-        </div>
-      )}
-
-      {/* ログ一覧 */}
-      <div style={{ marginTop: '30px' }}>
-        {filteredLogs.length === 0 ? (
-          <p style={{ textAlign: 'center', color: '#999' }}>ログがありません</p>
-        ) : (
-          filteredLogs.map(log => (
-            <div key={log.id} style={{ marginBottom: '15px', padding: '15px', backgroundColor: '#f5f5f5', borderRadius: '8px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                <div style={{ flex: 1 }}>
-                  <div style={{ display: 'flex', gap: '10px', marginBottom: '5px' }}>
-                    <span style={{ fontSize: '12px', padding: '2px 8px', backgroundColor: '#FF6B9D', color: 'white', borderRadius: '12px' }}>
-                      {LogTypeLabels[log.logType as keyof typeof LogTypeLabels]}
-                    </span>
-                    <span style={{ fontSize: '12px', padding: '2px 8px', backgroundColor: log.visibility === 'shared' ? '#4CAF50' : '#999', color: 'white', borderRadius: '12px' }}>
-                      {log.visibility === 'shared' ? '共有' : 'プライベート'}
-                    </span>
-                  </div>
-                  <p style={{ margin: '10px 0', whiteSpace: 'pre-wrap' }}>{log.content}</p>
-                  <p style={{ fontSize: '12px', color: '#999', margin: '5px 0' }}>
-                    {new Date(log.createdAt).toLocaleString('ja-JP')}
-                  </p>
-                </div>
+        {/* 作成フォーム */}
+        {showForm && (
+          <Card>
+            <CardContent className="space-y-4 pt-6">
+              <div>
+                <label className="mb-2 block text-sm font-semibold">種類</label>
+                <select
+                  value={logType}
+                  onChange={(e) => setLogType(e.target.value)}
+                  className="h-11 w-full rounded-xl border border-input bg-background px-3 text-sm"
+                >
+                  {Object.entries(LogTypeLabels).map(([value, label]) => (
+                    <option key={value} value={value}>{label}</option>
+                  ))}
+                </select>
               </div>
 
-              {log.visibility === 'private' && (
-                <button
-                  onClick={() => handlePromoteToShared(log.id)}
-                  style={{
-                    marginTop: '10px',
-                    padding: '8px 16px',
-                    backgroundColor: '#4CAF50',
-                    color: 'white',
-                    border: 'none',
-                    borderRadius: '5px',
-                    cursor: 'pointer',
-                    fontSize: '14px'
-                  }}
-                >
-                  共有に変更
-                </button>
-              )}
-            </div>
-          ))
-        )}
-      </div>
+              <div>
+                <label className="mb-2 block text-sm font-semibold">内容</label>
+                <Textarea
+                  value={content}
+                  onChange={(e) => setContent(e.target.value)}
+                  placeholder="ログの内容を入力..."
+                  className="min-h-[100px]"
+                />
+              </div>
 
-      <div style={{ marginTop: '30px' }}>
-        <Link href="/dashboard" style={{ color: '#FF6B9D' }}>
-          ← ダッシュボードに戻る
-        </Link>
+              <Button
+                onClick={handleCreate}
+                disabled={creating}
+                className="w-full"
+                size="lg"
+              >
+                {creating ? '作成中...' : '作成'}
+              </Button>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* ログ一覧 */}
+        {filteredLogs.length === 0 ? (
+          <EmptyState
+            icon={FileText}
+            title="ログがありません"
+            description="新しいログを作成してみましょう"
+            action={{
+              label: '作成する',
+              onClick: () => setShowForm(true),
+            }}
+          />
+        ) : (
+          <div className="space-y-4">
+            {filteredLogs.map(log => (
+              <Card key={log.id}>
+                <CardContent className="pt-6">
+                  <div className="mb-3 flex flex-wrap gap-2">
+                    <Badge>
+                      {LogTypeLabels[log.logType as keyof typeof LogTypeLabels]}
+                    </Badge>
+                    <Badge variant={log.visibility === 'shared' ? 'shared' : 'private'}>
+                      {log.visibility === 'shared' ? '共有' : 'プライベート'}
+                    </Badge>
+                  </div>
+                  <p className="whitespace-pre-wrap text-sm">{log.content}</p>
+                  <p className="mt-3 text-xs text-muted-foreground">
+                    {new Date(log.createdAt).toLocaleString('ja-JP')}
+                  </p>
+
+                  {log.visibility === 'private' && (
+                    <Button
+                      onClick={() => {
+                        setSelectedLogId(log.id)
+                        setConfirmOpen(true)
+                      }}
+                      variant="outline"
+                      size="sm"
+                      className="mt-3"
+                    >
+                      <Eye className="mr-2 h-4 w-4" />
+                      共有に変更
+                    </Button>
+                  )}
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        )}
+
+        {/* 確認ダイアログ */}
+        <ConfirmDialog
+          open={confirmOpen}
+          onOpenChange={setConfirmOpen}
+          title="共有に変更しますか？"
+          description="このログをパートナーにも表示するようにします。この操作は取り消せません。"
+          confirmLabel="共有する"
+          onConfirm={handlePromoteToShared}
+        />
       </div>
-    </div>
+    </AppShell>
   )
 }
