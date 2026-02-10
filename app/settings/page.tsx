@@ -2,14 +2,21 @@
 
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import Link from 'next/link'
+import { Settings, User, Users, LogOut, Save } from 'lucide-react'
 import { getCurrentUser, getCurrentUserProfile, signOut } from '@/lib/auth'
 import { getCurrentUserGroup } from '@/lib/group'
 import { updateGroupName } from '@/lib/group/createGroup'
 import { supabase } from '@/lib/supabase/client'
+import { AppShell } from '@/components/layout/app-shell'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Skeleton } from '@/components/ui/skeleton'
+import { useToast } from '@/components/ui/toast-provider'
 
 export default function SettingsPage() {
   const router = useRouter()
+  const { showToast } = useToast()
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [user, setUser] = useState<any>(null)
@@ -43,6 +50,7 @@ export default function SettingsPage() {
       setGroup(userGroup)
     } catch (error) {
       console.error(error)
+      showToast('error', 'データの読み込みに失敗しました')
     } finally {
       setLoading(false)
     }
@@ -50,7 +58,7 @@ export default function SettingsPage() {
 
   const handleUpdateName = async () => {
     if (!name.trim()) {
-      alert('名前を入力してください')
+      showToast('error', '名前を入力してください')
       return
     }
 
@@ -71,10 +79,10 @@ export default function SettingsPage() {
         await updateGroupName(group.id)
       }
 
-      alert('名前を更新しました！')
+      showToast('success', '名前を更新しました！')
       await loadData()
     } catch (error: any) {
-      alert(error.message)
+      showToast('error', error.message)
     } finally {
       setSaving(false)
     }
@@ -85,89 +93,101 @@ export default function SettingsPage() {
       await signOut()
       router.push('/')
     } catch (error) {
-      console.error('ログアウトに失敗しました', error)
+      showToast('error', 'ログアウトに失敗しました')
     }
   }
 
   if (loading) {
-    return <div style={{ padding: '20px', textAlign: 'center' }}>読み込み中...</div>
+    return (
+      <AppShell title="設定">
+        <div className="space-y-4">
+          <Skeleton className="h-40 w-full" />
+          <Skeleton className="h-32 w-full" />
+        </div>
+      </AppShell>
+    )
   }
 
   return (
-    <div style={{ maxWidth: '600px', margin: '0 auto', padding: '20px' }}>
-      <h1>⚙️ 設定</h1>
+    <AppShell title="設定">
+      <div className="space-y-6">
+        {/* プロフィール設定 */}
+        <Card>
+          <CardHeader>
+            <div className="flex items-center gap-2">
+              <User className="h-5 w-5 text-primary" />
+              <CardTitle>プロフィール</CardTitle>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-4">
+              <div>
+                <label className="mb-2 block text-sm font-semibold">名前</label>
+                <Input
+                  type="text"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="あなたの名前"
+                />
+                <p className="mt-2 text-xs text-muted-foreground">
+                  ※ 名前を変更すると、グループ名も自動的に更新されます
+                </p>
+              </div>
 
-      {/* プロフィール設定 */}
-      <div style={{ marginTop: '30px', padding: '20px', backgroundColor: '#f5f5f5', borderRadius: '8px' }}>
-        <h3>プロフィール</h3>
+              <Button
+                onClick={handleUpdateName}
+                disabled={saving}
+                className="w-full"
+                size="lg"
+              >
+                <Save className="mr-2 h-5 w-5" />
+                {saving ? '更新中...' : '名前を更新'}
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
 
-        <div style={{ marginTop: '15px' }}>
-          <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>名前</label>
-          <input
-            type="text"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            style={{ width: '100%', padding: '10px', fontSize: '16px' }}
-          />
-          <p style={{ fontSize: '12px', color: '#666', marginTop: '5px' }}>
-            ※ 名前を変更すると、グループ名も自動的に更新されます
-          </p>
-        </div>
+        {/* グループ情報 */}
+        {group && (
+          <Card>
+            <CardHeader>
+              <div className="flex items-center gap-2">
+                <Users className="h-5 w-5 text-primary" />
+                <CardTitle>グループ情報</CardTitle>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-3">
+                <div>
+                  <span className="text-sm font-medium">グループ名:</span>
+                  <p className="mt-1 text-lg font-semibold">{group.name}</p>
+                </div>
+                <div>
+                  <span className="text-sm font-medium">作成日:</span>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    {new Date(group.createdAt).toLocaleDateString('ja-JP')}
+                  </p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
-        <button
-          onClick={handleUpdateName}
-          disabled={saving}
-          style={{
-            marginTop: '15px',
-            width: '100%',
-            padding: '12px',
-            backgroundColor: '#FF6B9D',
-            color: 'white',
-            border: 'none',
-            borderRadius: '5px',
-            fontSize: '16px',
-            cursor: saving ? 'not-allowed' : 'pointer'
-          }}
-        >
-          {saving ? '更新中...' : '名前を更新'}
-        </button>
+        {/* ログアウト */}
+        <Card>
+          <CardContent className="pt-6">
+            <Button
+              onClick={handleLogout}
+              variant="outline"
+              className="w-full"
+              size="lg"
+            >
+              <LogOut className="mr-2 h-5 w-5" />
+              ログアウト
+            </Button>
+          </CardContent>
+        </Card>
       </div>
-
-      {/* グループ情報 */}
-      {group && (
-        <div style={{ marginTop: '30px', padding: '20px', backgroundColor: '#f5f5f5', borderRadius: '8px' }}>
-          <h3>グループ情報</h3>
-          <p style={{ marginTop: '10px' }}>グループ名: <strong>{group.name}</strong></p>
-          <p style={{ fontSize: '12px', color: '#666', marginTop: '5px' }}>
-            作成日: {new Date(group.createdAt).toLocaleDateString('ja-JP')}
-          </p>
-        </div>
-      )}
-
-      {/* ログアウト */}
-      <div style={{ marginTop: '30px' }}>
-        <button
-          onClick={handleLogout}
-          style={{
-            width: '100%',
-            padding: '12px',
-            backgroundColor: '#f5f5f5',
-            color: '#666',
-            border: '1px solid #ddd',
-            borderRadius: '5px',
-            fontSize: '16px',
-            cursor: 'pointer'
-          }}
-        >
-          ログアウト
-        </button>
-      </div>
-
-      <div style={{ marginTop: '30px' }}>
-        <Link href="/dashboard" style={{ color: '#FF6B9D' }}>
-          ← ダッシュボードに戻る
-        </Link>
-      </div>
-    </div>
+    </AppShell>
   )
 }
