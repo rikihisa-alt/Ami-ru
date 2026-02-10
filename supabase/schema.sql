@@ -202,6 +202,26 @@ CREATE INDEX idx_reads_domain ON reads(domain);
 CREATE INDEX idx_reads_last_seen ON reads(last_seen_at DESC);
 
 -- ========================================
+-- Attachments (添付ファイル)
+-- ========================================
+CREATE TABLE attachments (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  group_id UUID NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  owner_table TEXT NOT NULL, -- 'logs', 'future_items'
+  owner_id UUID NOT NULL,
+  file_key TEXT NOT NULL, -- Storage上のパス（UUID/filename形式）
+  file_name TEXT NOT NULL,
+  mime_type TEXT,
+  size_bytes BIGINT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX idx_attachments_group ON attachments(group_id);
+CREATE INDEX idx_attachments_owner ON attachments(owner_table, owner_id);
+CREATE INDEX idx_attachments_user ON attachments(user_id);
+
+-- ========================================
 -- Functions & Triggers
 -- ========================================
 
@@ -460,6 +480,21 @@ CREATE POLICY "Users can manage own reads"
 
 CREATE POLICY "Users can update own reads"
   ON reads FOR UPDATE
+  USING (user_id = auth.uid());
+
+-- Attachments
+ALTER TABLE attachments ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users can view attachments in their group"
+  ON attachments FOR SELECT
+  USING (group_id IN (SELECT group_id FROM group_members WHERE user_id = auth.uid()));
+
+CREATE POLICY "Users can insert own attachments"
+  ON attachments FOR INSERT
+  WITH CHECK (user_id = auth.uid());
+
+CREATE POLICY "Users can delete own attachments"
+  ON attachments FOR DELETE
   USING (user_id = auth.uid());
 
 -- ========================================
