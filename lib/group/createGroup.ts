@@ -2,81 +2,101 @@
  * グループ作成ユーティリティ
  */
 
-import { Group } from '@/types'
+import { supabase } from '../supabase/client'
 import { generateGroupName } from './useGroup'
 
-export interface CreateGroupParams {
-  user1Id: string
-  user1Name: string
-  user2Id: string
-  user2Name: string
-}
+export async function createOrJoinGroup(userId: string, userName: string): Promise<string> {
+  // 1. 既存のグループに所属しているかチェック
+  const { data: existingMember } = await supabase
+    .from('group_members')
+    .select('group_id')
+    .eq('user_id', userId)
+    .single()
 
-/**
- * 新しいグループを作成
- * @param params - グループ作成パラメータ
- * @returns 作成されたグループ情報
- *
- * TODO: Supabaseにデータを保存する
- */
-export async function createGroup(params: CreateGroupParams): Promise<Group> {
-  const { user1Id, user1Name, user2Id, user2Name } = params
-
-  // グループ名を生成
-  const groupName = generateGroupName(user1Name, user2Name)
-
-  // 仮実装: ダミーグループを返す
-  const newGroup: Group = {
-    id: `group-${Date.now()}`,
-    name: groupName,
-    user1Id,
-    user2Id,
-    createdAt: new Date(),
-    updatedAt: new Date(),
+  if (existingMember) {
+    return existingMember.group_id
   }
 
-  // TODO: Supabaseに保存
-  // await supabase.from('groups').insert(newGroup)
+  // 2. 待機中のグループ（メンバーが1人だけ）を探す
+  const { data: allGroupMembers } = await supabase
+    .from('group_members')
+    .select('group_id')
 
-  return newGroup
+  if (allGroupMembers) {
+    // グループごとのメンバー数をカウント
+    const groupCounts = new Map<string, number>()
+    allGroupMembers.forEach(member => {
+      const count = groupCounts.get(member.group_id) || 0
+      groupCounts.set(member.group_id, count + 1)
+    })
+
+    // メンバーが1人だけのグループを探す
+    for (const [groupId, count] of Array.from(groupCounts.entries())) {
+      if (count === 1) {
+        // 待機中のグループに参加
+        const { data: members } = await supabase
+          .from('group_members')
+          .select('user_id, profiles(name)')
+          .eq('group_id', groupId)
+
+        if (members && members.length === 1) {
+          // 自分を追加
+          await supabase
+            .from('group_members')
+            .insert({
+              group_id: groupId,
+              user_id: userId
+            })
+
+          // グループ名を更新
+          const partner = members[0]
+          const partnerName = (partner.profiles as any).name
+          const newGroupName = generateGroupName(partnerName, userName)
+
+          await supabase
+            .from('groups')
+            .update({ name: newGroupName })
+            .eq('id', groupId)
+
+          return groupId
+        }
+      }
+    }
+  }
+
+  // 3. 新しいグループを作成（メンバーは自分のみ、待機状態）
+  const { data: newGroup, error: groupError } = await supabase
+    .from('groups')
+    .insert({
+      name: `${userName} (待機中)`
+    })
+    .select()
+    .single()
+
+  if (groupError || !newGroup) {
+    throw new Error('グループ作成に失敗しました')
+  }
+
+  // 自分をメンバーに追加
+  await supabase
+    .from('group_members')
+    .insert({
+      group_id: newGroup.id,
+      user_id: userId
+    })
+
+  return newGroup.id
 }
 
-/**
- * グループ名を更新
- * @param groupId - グループID
- * @param user1Name - ユーザー1の新しい名前
- * @param user2Name - ユーザー2の新しい名前
- * @returns 更新されたグループ情報
- *
- * TODO: Supabaseのデータを更新する
- */
 export async function updateGroupName(
   groupId: string,
   user1Name: string,
   user2Name: string
-): Promise<Group | null> {
+): Promise<void> {
   const newName = generateGroupName(user1Name, user2Name)
 
-  // TODO: Supabaseで更新
-  // await supabase.from('groups').update({ name: newName }).eq('id', groupId)
-
-  return null
-}
-
-/**
- * グループにユーザーを招待
- * @param groupId - グループID
- * @param invitedUserId - 招待されるユーザーID
- * @returns 招待が成功したかどうか
- *
- * 注意: このアプリは2人グループ前提なので、基本的に使用しない
- * TODO: Supabaseで招待ロジックを実装する
- */
-export async function inviteUserToGroup(
-  groupId: string,
-  invitedUserId: string
-): Promise<boolean> {
-  // 仮実装
-  console.warn('このアプリは2人グループ前提です')
-  return false
+  await supabase
+    .from('groups')
+    .update({ name: newName })
+    .eq('id', groupId)
 }

@@ -7,49 +7,13 @@
 export type LogVisibility = 'private' | 'shared'
 
 // ログの種類
-export type LogType = 'memo' | 'shared' | 'chore' | 'gratitude'
-
-export interface Log {
-  id: string
-  groupId: string
-  userId: string // 作成者
-
-  type: LogType
-  visibility: LogVisibility
-
-  content: string
-  title?: string
-
-  createdAt: Date
-  updatedAt: Date
-}
-
-// 非公開メモ
-export interface PrivateMemo extends Omit<Log, 'type' | 'visibility'> {
-  type: 'memo'
-  visibility: 'private'
-}
-
-// 共有ログ
-export interface SharedLog extends Omit<Log, 'type' | 'visibility'> {
-  type: 'shared'
-  visibility: 'shared'
-}
-
-// 家事ログ
-export interface ChoreLog extends Omit<Log, 'type' | 'visibility'> {
-  type: 'chore'
-  visibility: 'shared'
-  choreType: ChoreType
-  completedAt: Date
-}
-
-// 感謝ログ
-export interface GratitudeLog extends Omit<Log, 'type' | 'visibility'> {
-  type: 'gratitude'
-  visibility: 'shared'
-  toUserId: string // 感謝を伝える相手
-}
+export type LogType =
+  | 'private_memo'    // 非公開メモ
+  | 'shared_log'      // 共有ログ
+  | 'gratitude'       // 感謝ログ
+  | 'apology'         // 事前謝罪
+  | 'chore_done'      // 家事完了
+  | 'satisfaction'    // 今日の満足度
 
 // 家事の種類
 export type ChoreType =
@@ -61,19 +25,51 @@ export type ChoreType =
   | 'trash'
   | 'other'
 
+export interface Log {
+  id: string
+  userId: string
+  groupId: string
+
+  logType: LogType
+  content: string
+  visibility: LogVisibility
+
+  // 消えるメモ用
+  expiresAt?: Date
+
+  // 家事ログ用
+  choreType?: ChoreType
+
+  // 満足度用
+  satisfactionScore?: 1 | 2 | 3 | 4 | 5
+
+  createdAt: Date
+  updatedAt: Date
+}
+
 export const LogTypeLabels: Record<LogType, string> = {
-  memo: '非公開メモ',
-  shared: '共有ログ',
-  chore: '家事ログ',
-  gratitude: '感謝ログ'
+  private_memo: '📝 非公開メモ',
+  shared_log: '📢 共有ログ',
+  gratitude: '💖 感謝',
+  apology: '🙏 事前謝罪',
+  chore_done: '✅ 家事完了',
+  satisfaction: '⭐ 今日の満足度'
 }
 
 export const ChoreTypeLabels: Record<ChoreType, string> = {
-  cooking: '料理',
-  dishes: '皿洗い',
-  laundry: '洗濯',
-  cleaning: '掃除',
-  shopping: '買い物',
-  trash: 'ゴミ出し',
+  cooking: '🍳 料理',
+  dishes: '🍽️ 皿洗い',
+  laundry: '👕 洗濯',
+  cleaning: '🧹 掃除',
+  shopping: '🛒 買い物',
+  trash: '🗑️ ゴミ出し',
   other: 'その他'
+}
+
+export const SatisfactionLabels: Record<1 | 2 | 3 | 4 | 5, string> = {
+  1: '😢 最悪',
+  2: '😞 微妙',
+  3: '😐 普通',
+  4: '😊 良かった',
+  5: '😄 最高'
 }

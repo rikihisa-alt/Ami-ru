@@ -19,3 +19,6 @@ export * from './rule'
 
 // 未来・提案
 export * from './future'
+
+// 既読
+export * from './read'

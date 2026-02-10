@@ -3,17 +3,15 @@
  */
 
 export {
-  getCurrentGroup,
+  getCurrentUserGroup,
   getPartnerUser,
-  getGroupUsers,
+  getGroupMembers,
   generateGroupName,
   isGroupMember,
   getPartnerId,
 } from './useGroup'
 
 export {
-  createGroup,
+  createOrJoinGroup,
   updateGroupName,
-  inviteUserToGroup,
-  type CreateGroupParams,
 } from './createGroup'

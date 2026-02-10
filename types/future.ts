@@ -3,89 +3,60 @@
  * 将来の予定や希望を管理
  */
 
-// 提案の種類
-export type FutureType = 'place' | 'item' | 'anniversary' | 'suggestion'
+// アイテムの種類
+export type FutureItemType = 'place' | 'wish' | 'anniversary'
 
-// 提案の状態
-export type FutureStatus = 'proposed' | 'agreed' | 'done' | 'cancelled'
+// 温度感
+export type Temperature = 'hot' | 'warm' | 'cool'
 
-// 優先度
-export type Priority = 'high' | 'medium' | 'low'
+// 記念日の重さ
+export type AnniversaryWeight = 'light' | 'medium' | 'heavy'
 
-export interface FuturePlan {
+export interface FutureItem {
   id: string
   groupId: string
   userId: string // 提案者
 
-  type: FutureType
+  itemType: FutureItemType
   title: string
-  description?: string
+  detail?: string
 
-  status: FutureStatus
-  priority: Priority
+  // 温度感・優先度
+  temperature: Temperature
 
-  targetDate?: Date // 目標日
-  completedAt?: Date // 完了日
+  // サプライズ保護
+  surpriseProtected: boolean
+
+  // 記念日用
+  anniversaryDate?: Date
+  anniversaryWeight?: AnniversaryWeight
+  preDiscussion?: boolean // 事前すり合わせ済み
+
+  // ほしい物用
+  owned?: boolean // 所有済み
+  reason?: string
+
+  // その他の拡張用データ
+  extra?: Record<string, any>
 
   createdAt: Date
   updatedAt: Date
 }
 
-// 行きたい場所
-export interface PlaceToGo extends Omit<FuturePlan, 'type'> {
-  type: 'place'
-  location?: string
-  address?: string
-  url?: string
+export const FutureItemTypeLabels: Record<FutureItemType, string> = {
+  place: '📍 行きたい場所',
+  wish: '🎁 ほしい物',
+  anniversary: '🎉 記念日'
 }
 
-// ほしい物
-export interface ItemToGet extends Omit<FuturePlan, 'type'> {
-  type: 'item'
-  estimatedPrice?: number
-  url?: string
+export const TemperatureLabels: Record<Temperature, string> = {
+  hot: '🔥 めっちゃ',
+  warm: '☀️ まあまあ',
+  cool: '🌤️ いつか'
 }
 
-// 記念日
-export interface Anniversary extends Omit<FuturePlan, 'type'> {
-  type: 'anniversary'
-  date: Date // 記念日は日付必須
-  isRecurring: boolean // 毎年繰り返すか
-}
-
-// 提案カード
-export interface SuggestionCard extends Omit<FuturePlan, 'type'> {
-  type: 'suggestion'
-  category?: SuggestionCategory
-}
-
-// 提案のカテゴリ
-export type SuggestionCategory = 'date' | 'activity' | 'habit' | 'improvement' | 'other'
-
-export const FutureTypeLabels: Record<FutureType, string> = {
-  place: '行きたい場所',
-  item: 'ほしい物',
-  anniversary: '記念日',
-  suggestion: '提案'
-}
-
-export const FutureStatusLabels: Record<FutureStatus, string> = {
-  proposed: '提案中',
-  agreed: '合意済み',
-  done: '完了',
-  cancelled: 'キャンセル'
-}
-
-export const PriorityLabels: Record<Priority, string> = {
-  high: '高',
-  medium: '中',
-  low: '低'
-}
-
-export const SuggestionCategoryLabels: Record<SuggestionCategory, string> = {
-  date: 'デート',
-  activity: 'アクティビティ',
-  habit: '習慣',
-  improvement: '改善提案',
-  other: 'その他'
+export const AnniversaryWeightLabels: Record<AnniversaryWeight, string> = {
+  light: '軽め',
+  medium: '普通',
+  heavy: '重め'
 }
