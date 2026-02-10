@@ -182,19 +182,23 @@ CREATE INDEX idx_future_type ON future_items(item_type);
 CREATE INDEX idx_future_temperature ON future_items(temperature);
 
 -- ========================================
--- Reads (既読・最終閲覧)
+-- Reads (既読・最終閲覧) - domain単位に拡張
 -- ========================================
 CREATE TABLE reads (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  group_id UUID NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
   user_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
-  screen TEXT NOT NULL, -- 'dashboard', 'state', 'logs', 'rules', 'future'
+  domain TEXT NOT NULL, -- 'dashboard', 'state', 'logs', 'rules', 'future'
+  screen TEXT, -- オプション: 詳細画面名（将来の拡張用）
+  entity_id UUID, -- オプション: エンティティID（将来の拡張用）
   last_seen_at TIMESTAMPTZ DEFAULT NOW(),
 
-  UNIQUE(user_id, screen)
+  UNIQUE(user_id, domain)
 );
 
 CREATE INDEX idx_reads_user ON reads(user_id);
-CREATE INDEX idx_reads_screen ON reads(screen);
+CREATE INDEX idx_reads_group ON reads(group_id);
+CREATE INDEX idx_reads_domain ON reads(domain);
 CREATE INDEX idx_reads_last_seen ON reads(last_seen_at DESC);
 
 -- ========================================
@@ -446,8 +450,16 @@ CREATE POLICY "Users can manage own future items"
 -- Reads
 ALTER TABLE reads ENABLE ROW LEVEL SECURITY;
 
+CREATE POLICY "Users can view reads in their group"
+  ON reads FOR SELECT
+  USING (group_id IN (SELECT group_id FROM group_members WHERE user_id = auth.uid()));
+
 CREATE POLICY "Users can manage own reads"
-  ON reads FOR ALL
+  ON reads FOR INSERT
+  WITH CHECK (user_id = auth.uid());
+
+CREATE POLICY "Users can update own reads"
+  ON reads FOR UPDATE
   USING (user_id = auth.uid());
 
 -- ========================================

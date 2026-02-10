@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { getCurrentUser } from '@/lib/auth'
 import { getCurrentUserState, getPartnerState, upsertUserState } from '@/lib/services/state'
-import { updateLastSeen, getPartnerLastSeen, formatLastSeen } from '@/lib/services/reads'
+import { upsertRead, getPartnerLastSeen, formatLastSeen } from '@/lib/services/readService'
 import { getPartnerUser } from '@/lib/group'
 import { MoodScore, MoodLabels, TalkStateLabels, LifeStatusLabels } from '@/types'
 
@@ -37,7 +37,7 @@ export default function StatePage() {
       }
 
       // 自分の画面閲覧を記録
-      await updateLastSeen(user.id, 'state')
+      await upsertRead(user.id, 'state')
 
       const [state, pState, pUser, lastSeen] = await Promise.all([
         getCurrentUserState(user.id),

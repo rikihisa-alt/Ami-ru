@@ -8,7 +8,10 @@ import { getCurrentUserState, getPartnerState } from '@/lib/services/state'
 import { getLogs } from '@/lib/services/logs'
 import { getRules } from '@/lib/services/rules'
 import { getFutureItems } from '@/lib/services/future'
-import { updateLastSeen, getPartnerLastSeen, formatLastSeen } from '@/lib/services/reads'
+import { upsertRead, getPartnerReads, formatLastSeen } from '@/lib/services/readService'
+import { getPartnerUpdatedAtByDomain } from '@/lib/services/updateTracker'
+import { computeNewBadges, NewBadges } from '@/lib/services/notificationLikeService'
+import { supabase } from '@/lib/supabase/client'
 import Link from 'next/link'
 import { MoodLabels, MoodScore } from '@/types'
 
@@ -23,7 +26,14 @@ export default function DashboardPage() {
   const [recentLogs, setRecentLogs] = useState<any[]>([])
   const [rules, setRules] = useState<any[]>([])
   const [futureItems, setFutureItems] = useState<any[]>([])
-  const [partnerLastSeen, setPartnerLastSeen] = useState<string>('')
+  const [partnerLastSeenDashboard, setPartnerLastSeenDashboard] = useState<string>('')
+  const [partnerReadsFormatted, setPartnerReadsFormatted] = useState<Record<string, string>>({})
+  const [newBadges, setNewBadges] = useState<NewBadges>({
+    stateNew: false,
+    logsNew: false,
+    rulesNew: false,
+    futureNew: false,
+  })
 
   useEffect(() => {
     loadData()
@@ -40,20 +50,30 @@ export default function DashboardPage() {
       setUser(currentUser)
 
       // ダッシュボード閲覧を記録
-      await updateLastSeen(currentUser.id, 'dashboard')
+      await upsertRead(currentUser.id, 'dashboard')
 
       const userGroup = await getCurrentUserGroup(currentUser.id)
       setGroup(userGroup)
 
       if (userGroup) {
-        const [partnerData, state, pState, logs, rulesData, future, lastSeen] = await Promise.all([
+        const [
+          partnerData,
+          state,
+          pState,
+          logs,
+          rulesData,
+          future,
+          partnerReads,
+          partnerUpdatedAt,
+        ] = await Promise.all([
           getPartnerUser(currentUser.id),
           getCurrentUserState(currentUser.id),
           getPartnerState(currentUser.id),
           getLogs(userGroup.id, 5),
           getRules(userGroup.id),
           getFutureItems(userGroup.id, currentUser.id),
-          getPartnerLastSeen(currentUser.id, 'dashboard'),
+          getPartnerReads(currentUser.id),
+          getPartnerUpdatedAtByDomain(currentUser.id),
         ])
 
         setPartner(partnerData)
@@ -63,9 +83,34 @@ export default function DashboardPage() {
         setRules(rulesData.slice(0, 3))
         setFutureItems(future.slice(0, 3))
 
-        if (lastSeen) {
-          setPartnerLastSeen(formatLastSeen(lastSeen))
+        // パートナーの閲覧状況をフォーマット
+        if (partnerReads.dashboard) {
+          setPartnerLastSeenDashboard(formatLastSeen(partnerReads.dashboard))
         }
+
+        const formatted: Record<string, string> = {}
+        if (partnerReads.state) formatted.state = formatLastSeen(partnerReads.state)
+        if (partnerReads.logs) formatted.logs = formatLastSeen(partnerReads.logs)
+        if (partnerReads.rules) formatted.rules = formatLastSeen(partnerReads.rules)
+        if (partnerReads.future) formatted.future = formatLastSeen(partnerReads.future)
+        setPartnerReadsFormatted(formatted)
+
+        // 新着バッジを計算
+        // 自分自身のreadsを取得
+        const { data: myReadsData } = await supabase
+          .from('reads')
+          .select('*')
+          .eq('user_id', currentUser.id)
+
+        const myReads: Record<string, Date> = {}
+        if (myReadsData) {
+          for (const read of myReadsData) {
+            myReads[read.domain] = new Date(read.last_seen_at)
+          }
+        }
+
+        const badges = computeNewBadges(partnerUpdatedAt, myReads as any)
+        setNewBadges(badges)
       }
     } catch (error) {
       console.error(error)
@@ -86,12 +131,23 @@ export default function DashboardPage() {
         <div style={{ marginTop: '20px', padding: '15px', backgroundColor: '#f5f5f5', borderRadius: '8px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <h2 style={{ margin: 0 }}>{group.name}</h2>
-            {partnerLastSeen && (
-              <span style={{ fontSize: '12px', color: '#999' }}>{partnerLastSeen}に閲覧</span>
+            {partnerLastSeenDashboard && (
+              <span style={{ fontSize: '12px', color: '#999' }}>{partnerLastSeenDashboard}に閲覧</span>
             )}
           </div>
           {partner ? (
-            <p style={{ margin: '5px 0 0 0' }}>パートナー: {partner.name}</p>
+            <>
+              <p style={{ margin: '5px 0 0 0' }}>パートナー: {partner.name}</p>
+              {Object.keys(partnerReadsFormatted).length > 0 && (
+                <div style={{ marginTop: '10px', fontSize: '12px', color: '#666' }}>
+                  <p style={{ fontWeight: 'bold', margin: '5px 0' }}>相手の最終閲覧:</p>
+                  {partnerReadsFormatted.state && <p style={{ margin: '2px 0' }}>😊 状態: {partnerReadsFormatted.state}</p>}
+                  {partnerReadsFormatted.logs && <p style={{ margin: '2px 0' }}>📝 ログ: {partnerReadsFormatted.logs}</p>}
+                  {partnerReadsFormatted.rules && <p style={{ margin: '2px 0' }}>📋 ルール: {partnerReadsFormatted.rules}</p>}
+                  {partnerReadsFormatted.future && <p style={{ margin: '2px 0' }}>🎉 未来: {partnerReadsFormatted.future}</p>}
+                </div>
+              )}
+            </>
           ) : (
             <p style={{ margin: '5px 0 0 0' }}>⏳ パートナー待機中...</p>
           )}
@@ -100,7 +156,14 @@ export default function DashboardPage() {
 
       {/* 状態カード */}
       <div style={{ marginTop: '30px' }}>
-        <h3>😊 状態</h3>
+        <h3>
+          😊 状態
+          {newBadges.stateNew && (
+            <span style={{ marginLeft: '10px', padding: '2px 8px', backgroundColor: '#FF6B9D', color: 'white', borderRadius: '12px', fontSize: '12px', fontWeight: 'bold' }}>
+              New
+            </span>
+          )}
+        </h3>
         <div style={{ display: 'grid', gap: '15px', marginTop: '15px' }}>
           <div style={{ padding: '15px', backgroundColor: '#FFE5EC', borderRadius: '8px' }}>
             <h4 style={{ margin: '0 0 10px 0' }}>あなた</h4>
@@ -133,7 +196,14 @@ export default function DashboardPage() {
       {/* ルール要点 */}
       {rules.length > 0 && (
         <div style={{ marginTop: '30px' }}>
-          <h3>📋 ルール</h3>
+          <h3>
+            📋 ルール
+            {newBadges.rulesNew && (
+              <span style={{ marginLeft: '10px', padding: '2px 8px', backgroundColor: '#FF6B9D', color: 'white', borderRadius: '12px', fontSize: '12px', fontWeight: 'bold' }}>
+                New
+              </span>
+            )}
+          </h3>
           <div style={{ marginTop: '15px' }}>
             {rules.map(rule => (
               <div key={rule.id} style={{ marginBottom: '10px', padding: '10px', backgroundColor: '#f5f5f5', borderRadius: '5px', fontSize: '14px' }}>
@@ -147,7 +217,14 @@ export default function DashboardPage() {
       {/* 最新ログ */}
       {recentLogs.length > 0 && (
         <div style={{ marginTop: '30px' }}>
-          <h3>📝 最新ログ</h3>
+          <h3>
+            📝 最新ログ
+            {newBadges.logsNew && (
+              <span style={{ marginLeft: '10px', padding: '2px 8px', backgroundColor: '#FF6B9D', color: 'white', borderRadius: '12px', fontSize: '12px', fontWeight: 'bold' }}>
+                New
+              </span>
+            )}
+          </h3>
           <div style={{ marginTop: '15px' }}>
             {recentLogs.map(log => (
               <div key={log.id} style={{ marginBottom: '10px', padding: '10px', backgroundColor: '#f5f5f5', borderRadius: '5px', fontSize: '14px' }}>
@@ -161,7 +238,14 @@ export default function DashboardPage() {
       {/* 未来カード */}
       {futureItems.length > 0 && (
         <div style={{ marginTop: '30px' }}>
-          <h3>🎉 未来</h3>
+          <h3>
+            🎉 未来
+            {newBadges.futureNew && (
+              <span style={{ marginLeft: '10px', padding: '2px 8px', backgroundColor: '#FF6B9D', color: 'white', borderRadius: '12px', fontSize: '12px', fontWeight: 'bold' }}>
+                New
+              </span>
+            )}
+          </h3>
           <div style={{ marginTop: '15px' }}>
             {futureItems.map(item => (
               <div key={item.id} style={{ marginBottom: '10px', padding: '10px', backgroundColor: '#f5f5f5', borderRadius: '5px', fontSize: '14px' }}>
