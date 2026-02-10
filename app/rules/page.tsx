@@ -1,11 +1,12 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { getCurrentUser } from '@/lib/auth'
 import { getRules, createRule, getChecklistItems, updateChecklistItem } from '@/lib/services/rules'
 import { getCurrentUserGroup } from '@/lib/group'
+import { upsertRead } from '@/lib/services/readService'
 import { ChecklistStatusLabels } from '@/types'
 
 export default function RulesPage() {
@@ -14,6 +15,11 @@ export default function RulesPage() {
   const [rules, setRules] = useState<any[]>([])
   const [checklist, setChecklist] = useState<any[]>([])
   const [tab, setTab] = useState<'rules' | 'checklist'>('rules')
+
+  // 検索・フィルタ
+  const [searchKeyword, setSearchKeyword] = useState('')
+  const [filterUndecidedOnly, setFilterUndecidedOnly] = useState(false)
+  const [filterCategory, setFilterCategory] = useState<string>('all')
 
   // 新規ルール作成
   const [showForm, setShowForm] = useState(false)
@@ -34,6 +40,9 @@ export default function RulesPage() {
         return
       }
 
+      // ルールページ閲覧を記録
+      await upsertRead(user.id, 'rules')
+
       const group = await getCurrentUserGroup(user.id)
       if (!group) return
 
@@ -51,7 +60,7 @@ export default function RulesPage() {
     }
   }
 
-  const handleCreateRule = async () => {
+  const handleCreate = async () => {
     if (!title.trim() || !content.trim()) return
 
     setCreating(true)
@@ -66,7 +75,7 @@ export default function RulesPage() {
         groupId: group.id,
         category: category as any,
         title,
-        content
+        content,
       })
 
       setTitle('')
@@ -80,14 +89,53 @@ export default function RulesPage() {
     }
   }
 
-  const handleUpdateChecklistItem = async (itemId: string, status: string) => {
+  const handleChecklistStatusChange = async (itemId: string, newStatus: string) => {
     try {
-      await updateChecklistItem(itemId, { status: status as any })
+      await updateChecklistItem(itemId, newStatus as any)
       await loadData()
     } catch (error: any) {
       alert('更新に失敗しました: ' + error.message)
     }
   }
+
+  // クライアント側フィルタリング（NOTE: データ量が増えたらサーバー側で実装すること）
+  const filteredRules = useMemo(() => {
+    let result = rules
+
+    if (searchKeyword.trim()) {
+      const keyword = searchKeyword.toLowerCase()
+      result = result.filter(rule =>
+        rule.title.toLowerCase().includes(keyword) ||
+        rule.content.toLowerCase().includes(keyword)
+      )
+    }
+
+    return result
+  }, [rules, searchKeyword])
+
+  const filteredChecklist = useMemo(() => {
+    let result = checklist
+
+    // 未決のみフィルタ
+    if (filterUndecidedOnly) {
+      result = result.filter(item => item.status === 'undecided')
+    }
+
+    // カテゴリフィルタ
+    if (filterCategory !== 'all') {
+      result = result.filter(item => item.category === filterCategory)
+    }
+
+    // キーワード検索
+    if (searchKeyword.trim()) {
+      const keyword = searchKeyword.toLowerCase()
+      result = result.filter(item =>
+        item.question.toLowerCase().includes(keyword)
+      )
+    }
+
+    return result
+  }, [checklist, filterUndecidedOnly, filterCategory, searchKeyword])
 
   if (loading) {
     return <div style={{ padding: '20px', textAlign: 'center' }}>読み込み中...</div>
@@ -97,11 +145,13 @@ export default function RulesPage() {
     <div style={{ maxWidth: '600px', margin: '0 auto', padding: '20px' }}>
       <h1>📋 ルール</h1>
 
+      {/* タブ */}
       <div style={{ marginTop: '20px', display: 'flex', gap: '10px' }}>
         <button
           onClick={() => setTab('rules')}
           style={{
-            padding: '10px 20px',
+            flex: 1,
+            padding: '10px',
             backgroundColor: tab === 'rules' ? '#FF6B9D' : '#f5f5f5',
             color: tab === 'rules' ? 'white' : '#333',
             border: 'none',
@@ -109,12 +159,13 @@ export default function RulesPage() {
             cursor: 'pointer'
           }}
         >
-          即見ルール
+          ルール
         </button>
         <button
           onClick={() => setTab('checklist')}
           style={{
-            padding: '10px 20px',
+            flex: 1,
+            padding: '10px',
             backgroundColor: tab === 'checklist' ? '#FF6B9D' : '#f5f5f5',
             color: tab === 'checklist' ? 'white' : '#333',
             border: 'none',
@@ -126,34 +177,71 @@ export default function RulesPage() {
         </button>
       </div>
 
+      {/* 検索・フィルタ */}
+      <div style={{ marginTop: '20px', padding: '15px', backgroundColor: '#f5f5f5', borderRadius: '8px' }}>
+        <div style={{ marginBottom: '10px' }}>
+          <input
+            type="text"
+            placeholder="キーワード検索..."
+            value={searchKeyword}
+            onChange={(e) => setSearchKeyword(e.target.value)}
+            style={{ width: '100%', padding: '8px', fontSize: '14px', borderRadius: '5px', border: '1px solid #ddd' }}
+          />
+        </div>
+        {tab === 'checklist' && (
+          <>
+            <div style={{ marginBottom: '10px' }}>
+              <select
+                value={filterCategory}
+                onChange={(e) => setFilterCategory(e.target.value)}
+                style={{ width: '100%', padding: '8px', fontSize: '14px', borderRadius: '5px', border: '1px solid #ddd' }}
+              >
+                <option value="all">すべてのカテゴリ</option>
+                <option value="money">お金</option>
+                <option value="chore">家事</option>
+                <option value="lifestyle">生活習慣</option>
+                <option value="communication">コミュニケーション</option>
+              </select>
+            </div>
+            <div>
+              <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer' }}>
+                <input
+                  type="checkbox"
+                  checked={filterUndecidedOnly}
+                  onChange={(e) => setFilterUndecidedOnly(e.target.checked)}
+                  style={{ marginRight: '8px' }}
+                />
+                <span>未決のみ表示</span>
+              </label>
+            </div>
+          </>
+        )}
+      </div>
+
       {tab === 'rules' && (
         <>
-          {!showForm && (
-            <button
-              onClick={() => setShowForm(true)}
-              style={{
-                marginTop: '20px',
-                width: '100%',
-                padding: '15px',
-                backgroundColor: '#FFC2D4',
-                color: '#333',
-                border: 'none',
-                borderRadius: '8px',
-                fontSize: '16px',
-                cursor: 'pointer',
-                fontWeight: 'bold'
-              }}
-            >
-              + ルール追加
-            </button>
-          )}
+          {/* 新規作成ボタン */}
+          <button
+            onClick={() => setShowForm(!showForm)}
+            style={{
+              marginTop: '20px',
+              width: '100%',
+              padding: '12px',
+              backgroundColor: '#FF6B9D',
+              color: 'white',
+              border: 'none',
+              borderRadius: '5px',
+              cursor: 'pointer'
+            }}
+          >
+            {showForm ? '閉じる' : '+ 新しいルールを作成'}
+          </button>
 
+          {/* 作成フォーム */}
           {showForm && (
-            <div style={{ marginTop: '20px', padding: '20px', backgroundColor: '#f5f5f5', borderRadius: '8px' }}>
-              <h3>新規ルール</h3>
-
-              <div style={{ marginTop: '15px' }}>
-                <label style={{ display: 'block', marginBottom: '5px' }}>カテゴリ</label>
+            <div style={{ marginTop: '20px', padding: '15px', backgroundColor: '#f5f5f5', borderRadius: '8px' }}>
+              <div style={{ marginBottom: '10px' }}>
+                <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>カテゴリ</label>
                 <select
                   value={category}
                   onChange={(e) => setCategory(e.target.value)}
@@ -165,84 +253,60 @@ export default function RulesPage() {
                 </select>
               </div>
 
-              <div style={{ marginTop: '15px' }}>
-                <label style={{ display: 'block', marginBottom: '5px' }}>タイトル</label>
+              <div style={{ marginBottom: '10px' }}>
+                <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>タイトル</label>
                 <input
                   type="text"
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
-                  placeholder="例: 家賃の分担"
+                  placeholder="ルールのタイトル"
                   style={{ width: '100%', padding: '10px', fontSize: '16px' }}
                 />
               </div>
 
-              <div style={{ marginTop: '15px' }}>
-                <label style={{ display: 'block', marginBottom: '5px' }}>内容</label>
+              <div style={{ marginBottom: '10px' }}>
+                <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>内容</label>
                 <textarea
                   value={content}
                   onChange={(e) => setContent(e.target.value)}
-                  placeholder="決めたことを記録..."
-                  style={{ width: '100%', padding: '10px', fontSize: '16px', minHeight: '100px' }}
+                  placeholder="ルールの内容..."
+                  style={{ width: '100%', padding: '10px', fontSize: '16px', minHeight: '80px' }}
                 />
               </div>
 
-              <div style={{ marginTop: '15px', display: 'flex', gap: '10px' }}>
-                <button
-                  onClick={handleCreateRule}
-                  disabled={creating}
-                  style={{
-                    flex: 1,
-                    padding: '12px',
-                    backgroundColor: '#FF6B9D',
-                    color: 'white',
-                    border: 'none',
-                    borderRadius: '5px',
-                    cursor: creating ? 'not-allowed' : 'pointer'
-                  }}
-                >
-                  {creating ? '作成中...' : '作成'}
-                </button>
-                <button
-                  onClick={() => {
-                    setShowForm(false)
-                    setTitle('')
-                    setContent('')
-                  }}
-                  style={{
-                    flex: 1,
-                    padding: '12px',
-                    backgroundColor: '#ccc',
-                    color: '#333',
-                    border: 'none',
-                    borderRadius: '5px',
-                    cursor: 'pointer'
-                  }}
-                >
-                  キャンセル
-                </button>
-              </div>
+              <button
+                onClick={handleCreate}
+                disabled={creating}
+                style={{
+                  width: '100%',
+                  padding: '12px',
+                  backgroundColor: '#FF6B9D',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '5px',
+                  cursor: creating ? 'not-allowed' : 'pointer'
+                }}
+              >
+                {creating ? '作成中...' : '作成'}
+              </button>
             </div>
           )}
 
+          {/* ルール一覧 */}
           <div style={{ marginTop: '30px' }}>
-            {rules.length === 0 ? (
+            {filteredRules.length === 0 ? (
               <p style={{ textAlign: 'center', color: '#999' }}>ルールがありません</p>
             ) : (
-              rules.map(rule => (
-                <div
-                  key={rule.id}
-                  style={{
-                    marginBottom: '15px',
-                    padding: '15px',
-                    backgroundColor: '#FFF0F5',
-                    borderRadius: '8px'
-                  }}
-                >
-                  <h4>{rule.title}</h4>
-                  <p style={{ marginTop: '10px', fontSize: '14px', color: '#666' }}>
-                    {rule.content}
-                  </p>
-                  <p style={{ marginTop: '10px', fontSize: '12px', color: '#999' }}>
+              filteredRules.map(rule => (
+                <div key={rule.id} style={{ marginBottom: '15px', padding: '15px', backgroundColor: '#f5f5f5', borderRadius: '8px' }}>
+                  <div style={{ display: 'flex', gap: '10px', marginBottom: '10px' }}>
+                    <span style={{ fontSize: '12px', padding: '2px 8px', backgroundColor: '#FF6B9D', color: 'white', borderRadius: '12px' }}>
+                      {rule.category === 'money' ? 'お金' : rule.category === 'chore' ? '家事' : '一般'}
+                    </span>
+                  </div>
+                  <h3 style={{ margin: '10px 0' }}>{rule.title}</h3>
+                  <p style={{ margin: '10px 0', whiteSpace: 'pre-wrap' }}>{rule.content}</p>
+                  <p style={{ fontSize: '12px', color: '#999', margin: '5px 0' }}>
                     更新: {new Date(rule.updatedAt).toLocaleString('ja-JP')}
                   </p>
                 </div>
@@ -254,41 +318,35 @@ export default function RulesPage() {
 
       {tab === 'checklist' && (
         <div style={{ marginTop: '30px' }}>
-          {checklist.length === 0 ? (
-            <p style={{ textAlign: 'center', color: '#999' }}>チェックリストがありません</p>
+          {filteredChecklist.length === 0 ? (
+            <p style={{ textAlign: 'center', color: '#999' }}>該当するチェックリストがありません</p>
           ) : (
-            checklist.map(item => (
-              <div
-                key={item.id}
-                style={{
-                  marginBottom: '15px',
-                  padding: '15px',
-                  backgroundColor: '#f5f5f5',
-                  borderRadius: '8px'
-                }}
-              >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <h4 style={{ flex: 1 }}>{item.question}</h4>
-                  <select
-                    value={item.status}
-                    onChange={(e) => handleUpdateChecklistItem(item.id, e.target.value)}
-                    style={{
-                      padding: '8px',
-                      fontSize: '14px',
-                      borderRadius: '5px',
-                      border: '1px solid #ddd'
-                    }}
-                  >
-                    {Object.entries(ChecklistStatusLabels).map(([value, label]) => (
-                      <option key={value} value={value}>{label}</option>
-                    ))}
-                  </select>
+            filteredChecklist.map(item => (
+              <div key={item.id} style={{ marginBottom: '15px', padding: '15px', backgroundColor: '#f5f5f5', borderRadius: '8px' }}>
+                <div style={{ display: 'flex', gap: '10px', marginBottom: '10px' }}>
+                  <span style={{ fontSize: '12px', padding: '2px 8px', backgroundColor: '#999', color: 'white', borderRadius: '12px' }}>
+                    {item.category === 'money' ? 'お金' : item.category === 'chore' ? '家事' : item.category === 'lifestyle' ? '生活習慣' : 'コミュニケーション'}
+                  </span>
+                  <span style={{
+                    fontSize: '12px',
+                    padding: '2px 8px',
+                    backgroundColor: item.status === 'decided' ? '#4CAF50' : item.status === 'undecided' ? '#FFA726' : '#999',
+                    color: 'white',
+                    borderRadius: '12px'
+                  }}>
+                    {ChecklistStatusLabels[item.status as keyof typeof ChecklistStatusLabels]}
+                  </span>
                 </div>
-                {item.conclusion && (
-                  <p style={{ marginTop: '10px', fontSize: '14px', color: '#666' }}>
-                    結論: {item.conclusion}
-                  </p>
-                )}
+                <p style={{ margin: '10px 0', fontWeight: 'bold' }}>{item.question}</p>
+                <select
+                  value={item.status}
+                  onChange={(e) => handleChecklistStatusChange(item.id, e.target.value)}
+                  style={{ width: '100%', padding: '8px', fontSize: '14px', marginTop: '10px' }}
+                >
+                  {Object.entries(ChecklistStatusLabels).map(([value, label]) => (
+                    <option key={value} value={value}>{label}</option>
+                  ))}
+                </select>
               </div>
             ))
           )}
